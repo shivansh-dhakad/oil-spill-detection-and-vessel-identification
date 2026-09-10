@@ -6,9 +6,11 @@
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "upload:currents": "node scripts/upload_currents_to_supabase.js"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.49.0",
     "axios": "^1.7.7",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",

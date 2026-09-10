@@ -8,6 +8,7 @@ const fs = require("fs");
 
 const predictionsRouter = require("./routes/predictions");
 const mlClient = require("./data/mlClient");
+const { initFromSupabase } = require("./data/store");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -41,6 +42,9 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: err.message || "Internal server error" });
 });
 
-app.listen(PORT, () => {
-  console.log(`VarunaDrishti API listening on http://localhost:${PORT}`);
+// Initialize store with existing predictions from Supabase (if configured)
+initFromSupabase().finally(() => {
+  app.listen(PORT, () => {
+    console.log(`VarunaDrishti API listening on http://localhost:${PORT}`);
+  });
 });

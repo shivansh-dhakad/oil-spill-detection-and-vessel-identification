@@ -1,10 +1,11 @@
 /**
- * In-memory data store for VarunaDrishti.
+ * In-memory data store for VarunaDrishti with Supabase cloud persistence.
  *
- * This stands in for a real database. Swap `predictions` for a Mongo/Postgres
- * collection and the rest of the API surface (routes/predictions.js) does not
- * need to change, since all access goes through the functions exported here.
+ * Predictions are persisted to Supabase (when SUPABASE_URL + SUPABASE_SERVICE_KEY
+ * are set) and pre-loaded from there on startup so data survives server restarts.
  */
+
+const supabaseClient = require("./supabaseClient");
 
 const REGIONS = [
   { name: "Bay of Bengal", lat: 12.34, lon: 78.9 },
@@ -486,6 +487,14 @@ function createPredictionFromMlResult(mlResult, { jobId, originalName, sourceTyp
   };
 
   predictions.unshift(record);
+
+  // Persist to Supabase in background
+  if (supabaseClient.isSupabaseConfigured()) {
+    supabaseClient.savePrediction(record).catch((err) => {
+      console.warn("[Store] Background Supabase save error:", err.message);
+    });
+  }
+
   return record;
 }
 
@@ -501,6 +510,29 @@ function linkJobToPrediction(jobId, predictionId) {
   jobToPrediction.set(jobId, predictionId);
 }
 
+/**
+ * Hydrate predictions from Supabase on backend startup.
+ */
+async function initFromSupabase() {
+  if (!supabaseClient.isSupabaseConfigured()) return;
+  try {
+    const remote = await supabaseClient.loadPredictions(100);
+    if (remote && remote.length > 0) {
+      console.log(`[Store] Hydrated ${remote.length} prediction(s) from Supabase.`);
+      const existingIds = new Set(predictions.map((p) => p.id));
+      for (const p of remote) {
+        if (!existingIds.has(p.id)) {
+          predictions.push(p);
+          if (p.jobId) jobToPrediction.set(p.jobId, p.id);
+        }
+      }
+      predictions.sort((a, b) => new Date(b.acquiredAt) - new Date(a.acquiredAt));
+    }
+  } catch (err) {
+    console.warn("[Store] Failed to initialize from Supabase:", err.message);
+  }
+}
+
 module.exports = {
   listPredictions,
   getPrediction,
@@ -508,4 +540,5 @@ module.exports = {
   createPredictionFromMlResult,
   getPredictionIdForJob,
   linkJobToPrediction,
+  initFromSupabase,
 };
