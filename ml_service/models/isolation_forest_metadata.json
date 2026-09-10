@@ -1,0 +1,70 @@
+{
+  "model_version": "iforest-v1-20260904T100810Z",
+  "feature_names": [
+    "observation_count",
+    "min_distance_km",
+    "avg_distance_km",
+    "min_time_difference_hours",
+    "avg_time_difference_hours",
+    "avg_speed",
+    "max_speed",
+    "heading_variation"
+  ],
+  "sklearn_version": "1.7.1",
+  "training_config": {
+    "n_estimators": 200,
+    "contamination": "auto",
+    "random_state": 42,
+    "imputer_strategy": "median"
+  },
+  "score_calibration": {
+    "p01": -0.12855652973529605,
+    "p99": 0.1238848001202392,
+    "note": "Runtime normalizes (raw_anomaly_score - p01) / (p99 - p01), clipped to [0,1]. Fixed anchors from training, not per-batch."
+  },
+  "training_data_summary": {
+    "incident_count": 20,
+    "vessel_row_count": 39,
+    "rows_per_incident": {
+      "ais_reference_001": 1,
+      "ais_reference_002": 4,
+      "ais_reference_003": 3,
+      "ais_reference_004": 4,
+      "ais_reference_005": 2,
+      "ais_reference_006": 2,
+      "ais_reference_007": 1,
+      "ais_reference_008": 2,
+      "ais_reference_009": 1,
+      "ais_reference_010": 1,
+      "ais_reference_011": 2,
+      "ais_reference_012": 2,
+      "ais_reference_013": 2,
+      "ais_reference_014": 1,
+      "ais_reference_015": 2,
+      "ais_reference_016": 1,
+      "ais_reference_017": 1,
+      "ais_reference_018": 4,
+      "ais_reference_019": 2,
+      "ais_reference_020": 1
+    },
+    "lat_range": [
+      26.63569,
+      35.74595
+    ],
+    "lon_range": [
+      -66.98034,
+      -55.40921
+    ],
+    "time_range": [
+      "2021-12-31T13:39:57+00:00",
+      "2022-10-10T13:41:00+00:00"
+    ],
+    "ship_type_distribution": {
+      "unknown": 39
+    },
+    "observed_train_anomaly_rate": 0.23076923076923078
+  },
+  "trained_at": "2026-09-04T10:08:10.823007+00:00",
+  "model_note": "",
+  "source_input_file": "data\\processed\\historical_ais_incidents.json"
+}
