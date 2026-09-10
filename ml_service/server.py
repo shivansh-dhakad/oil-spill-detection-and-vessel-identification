@@ -70,6 +70,8 @@ DEFAULT_MODEL_CANDIDATES = [
     CURRENT_DIR / "models" / "model.safetensors",
     CURRENT_DIR / "models" / "final_statedict.pth",
 ]
+DEFAULT_HF_MODEL_REPO_ID = "shivanshdhakad/oil_spill_detection_using_unet_architecture"
+DEFAULT_HF_MODEL_FILENAME = "unetpp_best.pth"
 
 
 def get_default_model_path() -> str:
@@ -77,6 +79,39 @@ def get_default_model_path() -> str:
         if cand.exists():
             return str(cand)
     return str(CURRENT_DIR / "models" / "unetpp_best.pth")
+
+
+def resolve_model_path() -> str:
+    configured_path = os.environ.get("OIL_SPILL_MODEL_PATH")
+    if configured_path:
+        return configured_path
+
+    for candidate in DEFAULT_MODEL_CANDIDATES:
+        if candidate.exists():
+            return str(candidate)
+
+    repo_id = os.environ.get("HF_MODEL_REPO_ID", DEFAULT_HF_MODEL_REPO_ID)
+
+    filename = os.environ.get("HF_MODEL_FILENAME", DEFAULT_HF_MODEL_FILENAME)
+    revision = os.environ.get("HF_MODEL_REVISION") or None
+    repo_type = os.environ.get("HF_MODEL_REPO_TYPE", "model")
+    token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_HUB_TOKEN")
+
+    try:
+        from huggingface_hub import hf_hub_download
+
+        print(f"[startup] Downloading model from Hugging Face: {repo_id}/{filename}")
+        return hf_hub_download(
+            repo_id=repo_id,
+            filename=filename,
+            repo_type=repo_type,
+            revision=revision,
+            token=token,
+        )
+    except Exception as error:
+        raise RuntimeError(
+            f"Could not download model from Hugging Face ({repo_id}/{filename}): {error}"
+        ) from error
 
 
 # --------------------------------------------------------------------- #
@@ -99,7 +134,11 @@ def handle_too_large(e):
     }), 413
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model_path = os.environ.get("OIL_SPILL_MODEL_PATH", get_default_model_path())
+try:
+    model_path = resolve_model_path()
+except Exception as error:
+    model_path = get_default_model_path()
+    print(f"[startup] ERROR: {error}")
 
 print(f"[startup] Loading model from {model_path} on {device}...")
 try:
@@ -108,7 +147,7 @@ try:
 except Exception as e:
     print(f"[startup] ERROR: failed to load model: {e}")
     print("[startup] The server will still start, but /api/spill/analyze will fail "
-          "until a valid model file is available at OIL_SPILL_MODEL_PATH.")
+          "until a valid local model or Hugging Face model configuration is available.")
     model, model_metadata = None, {"error": str(e)}
 
 job_manager = JobManager(model=model, device=device, outputs_dir=str(OUTPUTS_DIR))

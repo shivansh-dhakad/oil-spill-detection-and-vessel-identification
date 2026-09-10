@@ -66,6 +66,22 @@ data flow.
 
 ## Setup
 
+### Render deployment
+
+The Render service downloads the model automatically at startup. Configure:
+
+```env
+HF_MODEL_REPO_ID=shivanshdhakad/oil_spill_detection_using_unet_architecture
+HF_MODEL_FILENAME=unetpp_best.pth
+HF_MODEL_REPO_TYPE=model
+# Optional for private repositories:
+HF_TOKEN=your-huggingface-token
+```
+
+The model is downloaded into the Hugging Face cache and reused while the
+instance remains available. Do not set `HF_MODEL_REPO_TYPE=space`; the model
+is stored in a Hugging Face model repository.
+
 ### 1. Install dependencies
 
 ```bash
