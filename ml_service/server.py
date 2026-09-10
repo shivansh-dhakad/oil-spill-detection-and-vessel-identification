@@ -249,7 +249,7 @@ def stream_job(job_id: str):
             if payload != last_payload:
                 yield f"data: {payload}\n\n"
                 last_payload = payload
-            if job_now.status in ("complete", "failed"):
+            if job_now.status in ("complete", "failed", "cancelled"):
                 break
             time.sleep(0.6)
 
@@ -257,6 +257,14 @@ def stream_job(job_id: str):
         "Cache-Control": "no-cache",
         "X-Accel-Buffering": "no",
     })
+
+
+@app.route("/api/spill/jobs/<job_id>/cancel", methods=["POST"])
+def cancel_job(job_id: str):
+    job = job_manager.cancel(job_id)
+    if job is None:
+        return jsonify({"error": "Unknown job_id."}), 404
+    return jsonify(job.to_dict())
 
 
 @app.route("/api/spill/files/<job_id>/<path:filename>", methods=["GET"])

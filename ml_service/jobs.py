@@ -40,7 +40,7 @@ class Job:
     input_path: str
     input_filename: str
     params: Dict[str, Any]
-    status: str = "queued"  # queued | processing | complete | failed
+    status: str = "queued"  # queued | processing | complete | failed | cancelled
     stages: Dict[str, Stage] = field(default_factory=dict)
     stage_order: List[str] = field(default_factory=lambda: list(STAGE_NAMES))
     result: Optional[Dict[str, Any]] = None
@@ -93,6 +93,18 @@ class JobManager:
         with self._lock:
             return self._jobs.get(job_id)
 
+    def cancel(self, job_id: str) -> Optional[Job]:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                return None
+            if job.status in ("complete", "failed", "cancelled"):
+                return job
+            job.status = "cancelled"
+            job.error = "Analysis cancelled by the user."
+            job.updated_at = time.time()
+            return job
+
     def start(self, job: Job) -> None:
         thread = threading.Thread(target=self._run, args=(job,), daemon=True)
         thread.start()
@@ -132,6 +144,8 @@ class JobManager:
                 on_stage=self._on_stage(job),
             )
             with self._lock:
+                if job.status == "cancelled":
+                    return
                 job.result = result
                 job.status = "complete"
                 job.updated_at = time.time()
