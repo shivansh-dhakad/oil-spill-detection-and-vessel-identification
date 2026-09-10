@@ -1,0 +1,322 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ======================================================================
+   VarunaDrishti — Immersive Deep-Ocean Command Theme
+   ====================================================================== */
+
+:root {
+  color-scheme: dark;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  background-color: #050b13;
+  position: relative;
+  overflow-x: hidden;
+}
+
+/* Fixed, layered "abyss" backdrop: gradient mesh + fine grid + vignette.
+   Sits behind everything (z-index -1) so every route feels like it is
+   rendered inside the same immersive command-center shell. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  background:
+    radial-gradient(circle at 18% 12%, rgba(34, 211, 238, 0.16), transparent 42%),
+    radial-gradient(circle at 84% 6%, rgba(45, 212, 191, 0.12), transparent 40%),
+    radial-gradient(circle at 50% 100%, rgba(56, 189, 248, 0.10), transparent 55%),
+    linear-gradient(180deg, #050b13 0%, #071019 45%, #050b13 100%);
+  background-size: 140% 140%, 140% 140%, 140% 140%, 100% 100%;
+  animation: drift 22s ease-in-out infinite;
+}
+
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(148, 163, 184, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.05) 1px, transparent 1px);
+  background-size: 42px 42px;
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black 40%, transparent 85%);
+}
+
+.material-symbols-outlined {
+  font-family: "Material Symbols Outlined";
+  font-weight: normal;
+  font-style: normal;
+  font-size: 20px;
+  line-height: 1;
+  display: inline-block;
+  white-space: nowrap;
+  vertical-align: middle;
+  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 20;
+}
+
+.bg-dots-pattern {
+  background-image: radial-gradient(rgba(148, 163, 184, 0.18) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.font-tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(34, 211, 238, 0.25);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(34, 211, 238, 0.45);
+}
+.custom-scrollbar::-webkit-scrollbar {
+  width: 5px;
+}
+
+@keyframes sweep {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+.radar-sweep {
+  animation: sweep 14s linear infinite;
+  transform-origin: 50% 50%;
+}
+
+/* ----------------------------------------------------------------------
+   Glass + glow primitives, used by the new hero/nav/motion components
+   ---------------------------------------------------------------------- */
+.glass-panel {
+  background: rgba(17, 28, 43, 0.55);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.text-glow {
+  text-shadow: 0 0 18px rgba(34, 211, 238, 0.45);
+}
+
+.perspective-1000 { perspective: 1000px; }
+.preserve-3d { transform-style: preserve-3d; }
+
+.tilt-card {
+  transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  transform-style: preserve-3d;
+}
+.tilt-card:hover {
+  transform: translateY(-4px) rotateX(2deg) rotateY(-2deg);
+}
+
+.gradient-text {
+  background: linear-gradient(90deg, #67e8f9, #2dd4bf 55%, #38bdf8);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.shimmer-bg {
+  background-image: linear-gradient(100deg, transparent 30%, rgba(255, 255, 255, 0.14) 45%, transparent 60%);
+  background-size: 200% 100%;
+  animation: shimmer 2.5s linear infinite;
+}
+
+/* Give every existing "card-white" surface real glass (blur + glow) without
+   touching each component file — the color itself already comes from the
+   dark token in tailwind.config.js. */
+.bg-card-white {
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+}
+.shadow-sm {
+  box-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.04), 0 8px 30px -12px rgba(0, 0, 0, 0.55) !important;
+}
+
+/* ----------------------------------------------------------------------
+   Global cascade retheme
+   The app's components reference plain Tailwind palette classes
+   (bg-white, bg-slate-50, text-slate-900, border-cyan-200, bg-rose-50 …)
+   all over 3,000+ lines of JSX. Rather than hand-edit every occurrence,
+   every one of those utilities is remapped here, once, to its dark-glass
+   equivalent. Because these rules compile after @tailwind utilities in
+   the same stylesheet, they win the cascade at equal specificity — the
+   whole app inherits the immersive theme consistently, including pages
+   not otherwise touched in this pass.
+   ---------------------------------------------------------------------- */
+
+/* Surfaces -> glass */
+.bg-white,
+.bg-slate-50,
+.bg-slate-100,
+.bg-slate-200,
+.focus\:bg-white:focus,
+.hover\:bg-white:hover,
+.hover\:bg-slate-50:hover,
+.hover\:bg-slate-100:hover,
+.hover\:bg-slate-200:hover,
+.hover\:bg-cyan-50:hover {
+  background-color: rgba(148, 163, 184, 0.07) !important;
+}
+.bg-slate-50\/60,
+.bg-slate-50\/40 {
+  background-color: rgba(148, 163, 184, 0.05) !important;
+}
+
+/* Deep "dark card" surfaces (already dark in the source design) get a
+   richer gradient + glow instead of flattening to the same glass tone. */
+.bg-slate-900 {
+  background: linear-gradient(155deg, #0b1826 0%, #0a1420 60%, #071019 100%) !important;
+  box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.14), 0 20px 50px -20px rgba(0, 0, 0, 0.6);
+}
+
+/* Borders -> soft cyan-tinted hairlines */
+.border-slate-50,
+.border-slate-100,
+.border-slate-200,
+.border-slate-300,
+.border-sky-100,
+.border-sky-200,
+.border-sky-300,
+.border-cyan-200,
+.divide-slate-100 > * + *,
+.hover\:border-slate-300:hover,
+.hover\:border-cyan-200:hover,
+.hover\:border-sky-300:hover {
+  border-color: rgba(148, 163, 184, 0.16) !important;
+}
+.border-slate-700 {
+  border-color: rgba(34, 211, 238, 0.18) !important;
+}
+
+/* Headings / high-emphasis text -> near-white */
+.text-slate-900,
+.text-slate-800,
+.text-slate-950 {
+  color: #eaf4ff !important;
+}
+
+/* Body text -> soft slate-blue, still readable on dark */
+.text-slate-700,
+.text-slate-600 {
+  color: #b7c4d9 !important;
+}
+
+/* Muted/meta text */
+.text-slate-500,
+.text-slate-400,
+.text-slate-300,
+.text-slate-200,
+.hover\:text-slate-700:hover {
+  color: #8393ab !important;
+}
+
+/* Accent tints (icon badges, chips) -> translucent glow tints */
+.bg-sky-50,
+.bg-sky-100,
+.bg-cyan-50,
+.bg-cyan-100,
+.ring-sky-100,
+.ring-cyan-100 {
+  background-color: rgba(34, 211, 238, 0.12) !important;
+}
+.text-sky-600,
+.text-sky-700,
+.text-sky-800,
+.text-cyan-300,
+.text-cyan-800 {
+  color: #5eead4 !important;
+}
+.bg-sky-700,
+.hover\:bg-sky-700:hover {
+  background-color: #0891b2 !important;
+}
+.bg-cyan-300,
+.hover\:bg-cyan-300:hover {
+  background-color: #67e8f9 !important;
+}
+.bg-cyan-400 {
+  background-color: #22d3ee !important;
+}
+
+/* Status tints: keep the semantic hue, translate to dark-friendly glass */
+.bg-rose-50 { background-color: rgba(251, 113, 133, 0.12) !important; }
+.border-rose-100, .border-rose-200, .border-rose-300 { border-color: rgba(251, 113, 133, 0.25) !important; }
+.text-rose-600, .text-rose-700, .text-rose-800, .text-rose-500 { color: #fb7185 !important; }
+
+.bg-emerald-50 { background-color: rgba(52, 211, 153, 0.12) !important; }
+.border-emerald-100, .border-emerald-200 { border-color: rgba(52, 211, 153, 0.25) !important; }
+.text-emerald-600, .text-emerald-700 { color: #34d399 !important; }
+
+.bg-amber-50 { background-color: rgba(251, 191, 36, 0.12) !important; }
+.border-amber-100, .border-amber-200 { border-color: rgba(251, 191, 36, 0.25) !important; }
+.text-amber-600, .text-amber-700 { color: #fbbf24 !important; }
+
+.bg-teal-50 { background-color: rgba(45, 212, 191, 0.12) !important; }
+.border-teal-100, .border-teal-200, .border-teal-300 { border-color: rgba(45, 212, 191, 0.25) !important; }
+.text-teal-500, .text-teal-600, .text-teal-700 { color: #2dd4bf !important; }
+
+body {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(34, 211, 238, 0.3) transparent;
+}
+
+/* Opacity-modified variants of the same neutral/sky palette, used in the
+   larger data pages (maps, tables, panels) that weren't hand-rewritten in
+   this pass — same retheme logic as above, just for the "/NN" forms. */
+.bg-white\/95,
+.bg-white\/90,
+.bg-white\/80,
+.bg-slate-50\/50,
+.bg-slate-50\/60,
+.bg-slate-50\/70,
+.bg-slate-50\/90,
+.bg-sky-50\/40,
+.bg-sky-50\/60,
+.bg-sky-50\/70,
+.bg-cyan-50\/30 {
+  background-color: rgba(148, 163, 184, 0.06) !important;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.border-slate-200\/80 {
+  border-color: rgba(148, 163, 184, 0.16) !important;
+}
+
+/* Leaflet map chrome (SpillMap / vessel proximity map) — retint the
+   default light control/attribution UI so it sits naturally on the dark
+   canvas instead of showing as a stray white box. */
+.leaflet-container {
+  background: #0a1420 !important;
+}
+.leaflet-control-zoom a,
+.leaflet-control-attribution,
+.leaflet-bar {
+  background: rgba(17, 28, 43, 0.85) !important;
+  color: #b7c4d9 !important;
+  border-color: rgba(148, 163, 184, 0.16) !important;
+  backdrop-filter: blur(8px);
+}
+.leaflet-control-attribution a {
+  color: #5eead4 !important;
+}
+.leaflet-popup-content-wrapper,
+.leaflet-popup-tip {
+  background: rgba(17, 28, 43, 0.92) !important;
+  color: #eaf4ff !important;
+}
