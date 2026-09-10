@@ -1,101 +1,138 @@
-# VarunaDrishti
+# VarunaDrishti (वरुणदृष्टि) 🌊🛰️
 
-Oil Spill Detection & Vessel Attribution platform — now fully wired end to
-end: **React frontend → Node.js/Express backend → Flask ML service**, with
-a live processing/transition screen and a real OpenStreetMap map.
+**AI-Powered Satellite Oil Spill Detection & Maritime Vessel Attribution Platform**
+
+VarunaDrishti combines Sentinel-1 Synthetic Aperture Radar (SAR) imagery, deep learning segmentation (UNet++ / SegFormer), oceanographic drift hindcasting, and real-time/historical AIS telemetry (Global Fishing Watch & AISStream) to detect oil slicks and attribute responsibility to maritime vessels.
+
+---
+
+## System Architecture
 
 ```
-React (Vite, :5173)  --/api-->  Express (:4000)  --/api/spill-->  Flask ML service (:5001)
-     |                                |                                  |
-  upload + live                  proxies job                    runs the real
-  progress UI                    submit/status/                 detection + drift +
-  + OSM map                      stream/files                   AIS attribution pipeline
+                                  ┌──────────────────────────────────────────────┐
+                                  │             Browser (End User)               │
+                                  └──────────────────────┬───────────────────────┘
+                                                         │ HTTPS
+                                                         ▼
+                                  ┌──────────────────────────────────────────────┐
+                                  │        Vercel (React / Vite Frontend)        │
+                                  │       https://varunadrishti.vercel.app       │
+                                  └──────────────────────┬───────────────────────┘
+                                                         │ /api/* (VITE_API_BASE_URL)
+                                                         ▼
+                                  ┌──────────────────────────────────────────────┐
+                                  │         Render (Node.js Express API)         │
+                                  │   https://varunadrishti-backend.onrender.com │
+                                  └──────────────┬────────────────────────┬──────┘
+                                                 │                        │
+                    Persists / Hydrates analysis │                        │ Analysis job forwarding
+                    records & audit trail        │                        │ (ML_SERVICE_URL)
+                                                 ▼                        ▼
+                      ┌────────────────────────────────────┐    ┌────────────────────────────────────────┐
+                      │         Supabase Database          │    │    Hugging Face Spaces (ML Engine)     │
+                      │  • predictions (Results & reports) │    │    https://<user>-<space>.hf.space      │
+                      │  • insitu_currents (Ocean vectors) │    │    • FastAPI + Gradio Wrapper (port 7860)
+                      └─────────────────▲──────────────────┘    │    • PyTorch UNet++ / SegFormer Model   │
+                                        │                       │    • OpenDrift Backward Hindcast       │
+                                        └───────────────────────┤    • Bayesian AIS Vessel Attribution   │
+                                          Remote currents query │    • 16 GB Free RAM (prevents OOM)     │
+                                          (eliminates 500MB CSV)└────────────────────────────────────────┘
 ```
 
-The frontend only ever talks to the Node backend (same as before) — Node
-proxies analysis requests on to the Flask ML service and never exposes it
-directly.
+---
 
-## What changed in this pass
+## Key Features
 
-1. **Real pipeline instead of the mock.** `POST /api/predictions` now
-   forwards the uploaded file to the Flask service and returns a `jobId`
-   immediately (detection takes real time - model inference, drift
-   simulation, AIS lookups).
-2. **A processing/transition screen.** `/processing/:jobId` shows all 8
-   pipeline stages (extraction → preprocessing → model inference →
-   segmentation → geolocation → environmental data → drift hindcast →
-   vessel attribution) updating live via Server-Sent Events, then
-   auto-navigates to the results page once the run completes.
-3. **A real map.** The results page's map is now OpenStreetMap tiles via
-   Leaflet (`frontend/src/components/SpillMap.jsx`) — spill centroid, a
-   radius circle sized from the detected area, the estimated drift origin,
-   the backward-hindcast trajectory, and AIS vessel candidates plotted at
-   their best-known positions, replacing the earlier illustrative SVG mock.
-4. **Geolocation inputs.** The "SAR Image + Spatial Metadata" tab on the
-   upload page now asks for latitude/longitude/acquisition time (required —
-   plain images don't carry embedded geolocation the way `.SAFE.zip`
-   archives do), plus optional drift-lookback and skip-AIS controls.
+1. **End-to-End Pipeline**:
+   - **Satellite Ingestion**: Supports raw Sentinel-1 `.SAFE.zip` archives or pre-cropped SAR images with spatial metadata.
+   - **Deep Learning Segmentation**: Dual support for UNet++ (`unetpp_best.pth`) and SegFormer-B2 (`model.safetensors`).
+   - **Environmental Geolocation**: Retrieves in-situ ocean currents (Copernicus / Argo drifters) and wind vectors (Open-Meteo).
+   - **Backward Drift Hindcast**: Simulates reverse slick trajectory to estimate original spill coordinates and release time.
+   - **Bayesian Vessel Attribution**: Correlates drift origin with AIS historical tracking data to rank suspect vessels with confidence scoring.
+2. **Live Transition Screen**: Real-time 8-stage progress reporting streamed live via Server-Sent Events (SSE) before navigating to results.
+3. **Interactive Tactical Map**: OpenStreetMap Leaflet map rendering spill polygons, uncertainty radius, hindcast trajectory, and suspect vessel coordinates.
+4. **Persistent History**: Supabase PostgreSQL database persistence ensures analysis reports and audit logs survive server redeployments.
+5. **100% Free-Tier Cloud Compatible**: Specially optimized to run across Vercel, Render, Hugging Face Spaces, and Supabase free tiers with zero hosting costs.
 
-## Project layout
+---
+
+## Project Structure
 
 ```
 oil spill project/
-  ml_service/          Flask API wrapping the ML pipeline (model, drift, AIS)
-    server.py            HTTP endpoints (job submit/status/stream/files)
-    jobs.py               in-memory async job runner
-    pipeline.py            same logic as the original app.py, emits JSON stage progress
-    model.py, preprocessing.py, safe_processor.py,
-    environment.py, drift.py, ais_attribution.py,
-    track_based_attribution.py, vessel_risk.py     unchanged detection/geolocation/drift/AIS logic
-
-  backend/              Express API
-    server.js
-    routes/predictions.js   list/detail/stats + job submit/status/stream/file proxy
-    data/store.js            in-memory prediction store + ML-result → Prediction mapping
-    data/mlClient.js          axios wrapper for calling ml_service
-
-  frontend/             React app
-    src/pages/
-      NewPrediction.jsx        upload + parameters (now with lat/lon/timestamp for images)
-      Processing.jsx            NEW: live stage-by-stage transition screen
-      PredictionResults.jsx     tactical map + AIS attribution sidebar
-      PredictionHistory.jsx     audit log
-    src/components/
-      Header.jsx
-      SpillMap.jsx               NEW: Leaflet/OSM map
-    src/api.js                    fetch wrapper (+ job polling/streaming)
+├── frontend/                     # React + Vite Client
+│   ├── src/
+│   │   ├── pages/                # NewPrediction, Processing, PredictionResults, History, IncidentManagement
+│   │   ├── components/           # SpillMap (Leaflet), AnalysisReport, Stage3D, Header, etc.
+│   │   └── api.js                # API client with VITE_API_BASE_URL support
+│   ├── vercel.json               # SPA route rewrite configuration for Vercel
+│   └── vite.config.js            # Vite configuration with local proxy
+│
+├── backend/                      # Node.js + Express API Gateway
+│   ├── server.js                 # Server entry point, CORS, and Supabase hydration
+│   ├── routes/predictions.js     # Analysis job submission, streaming, polling, and incident management
+│   ├── data/
+│   │   ├── store.js              # Prediction store with auto-persistence
+│   │   ├── supabaseClient.js     # Supabase REST client wrapper
+│   │   └── mlClient.js           # Forwarding client to ML engine (Render / HF Spaces)
+│   ├── scripts/
+│   │   └── upload_currents_to_supabase.js  # Stream & upload in-situ ocean currents
+│   └── supabase_schema.sql       # PostgreSQL schema (predictions + insitu_currents tables)
+│
+└── ml_service/                   # Python ML & Attribution Engine
+    ├── app_hf.py                 # Hugging Face Spaces entrypoint (FastAPI + Gradio + Flask mount)
+    ├── server.py                 # Flask REST API (analysis endpoints & SSE streaming)
+    ├── model.py                  # PyTorch model loader (UNet++ & SegFormer)
+    ├── pipeline.py               # Complete 8-stage detection & attribution pipeline
+    ├── drift.py                  # Backward trajectory simulation & OpenDrift integration
+    ├── ais_attribution.py        # Bayesian ship attribution & scoring engine
+    ├── insitu_currents.py        # Copernicus in-situ currents retrieval (SQLite / Supabase / CSV)
+    ├── upload_currents_to_supabase.py # Python script for currents extraction & upload
+    ├── insitu_clean.csv          # Clean paired surface currents (17 MB, 233,996 records)
+    ├── requirements.txt          # Python dependencies (includes torch, gradio, fastapi, uvicorn)
+    └── models/                   # Model checkpoints (unetpp_best.pth, isolation_forest.joblib)
 ```
 
-## Running it (three processes)
+---
 
-**1. ML service** (http://localhost:5001):
+## Running Locally
+
+### 1. ML Service (Port 5001 or 7860)
 
 ```bash
 cd ml_service
 pip install -r requirements.txt
-# put your model weights at ml_service/models/model.safetensors
-# (or set OIL_SPILL_MODEL_PATH to point elsewhere)
 python server.py
+# Or run with Hugging Face wrapper:
+# python app_hf.py
 ```
 
-Environment variables (`ml_service/.env`):
-```
-GFW_API_TOKEN=...
-AISSTREAM_API_KEY=...
-OIL_SPILL_MODEL_PATH=/path/to/model.safetensors   # optional override
+Environment configuration (`ml_service/.env`):
+```env
+PORT=5001
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_KEY=your_supabase_key
+GFW_API_TOKEN=your_gfw_token_here          # Optional: Global Fishing Watch
+AISSTREAM_API_KEY=your_aisstream_key_here  # Optional: Real-time AIS
 ```
 
-**2. Backend** (http://localhost:4000):
+### 2. Backend (Port 4000)
 
 ```bash
 cd backend
 npm install
-cp .env.example .env     # ML_SERVICE_URL defaults to http://localhost:5001
-npm start                # or `npm run dev` for auto-restart
+npm run dev
 ```
 
-**3. Frontend** (http://localhost:5173):
+Environment configuration (`backend/.env`):
+```env
+PORT=4000
+ML_SERVICE_URL=http://localhost:5001
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_KEY=your_supabase_service_role_key
+```
+
+### 3. Frontend (Port 5173)
 
 ```bash
 cd frontend
@@ -103,51 +140,69 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173. Vite proxies `/api/*` to the Node backend in
-dev, so no CORS config is needed. `npm run build` produces a static
-`dist/` you can serve from Express or any static host.
+Open [http://localhost:5173](http://localhost:5173). Requests to `/api/*` are automatically proxied to `http://localhost:4000`.
 
-> If `ml_service` isn't running, the backend and frontend still start and
-> the History/existing-record views still work — `POST /api/predictions`
-> and `/api/health`'s `mlService` field will just report it as unreachable
-> until you start it.
+---
 
-## API surface (Node backend)
+## Free-Tier Cloud Deployment Guide
 
-| Method | Path                                        | Description |
-|--------|----------------------------------------------|--------------|
-| GET    | `/api/health`                                | Liveness check, including ML service reachability |
-| GET    | `/api/predictions`                           | List, with `?status=&minConfidence=&region=&search=` |
-| GET    | `/api/predictions/stats/summary`             | Dashboard summary metrics |
-| GET    | `/api/predictions/:id`                       | Full detail for the results page |
-| POST   | `/api/predictions`                           | Upload a file, kicks off a real analysis job, returns `{ jobId }` |
-| GET    | `/api/predictions/jobs/:jobId`               | Poll job status/stages; once complete, includes `predictionId` |
-| GET    | `/api/predictions/jobs/:jobId/stream`        | Server-Sent Events — live stage updates |
-| GET    | `/api/predictions/files/:jobId/:filename`    | Mask/overlay PNG, trajectory CSV/PNG |
-| GET    | `/api/incidents`                              | Search and filter oil spill incidents |
-| GET    | `/api/incidents/:incidentId`                  | Read one incident |
-| PATCH  | `/api/incidents/:incidentId/status`           | Update lifecycle status |
+| Tier | Platform | Build Command | Start Command / Entrypoint |
+|---|---|---|---|
+| **Frontend** | **Vercel** | `npm run build` | `dist/` |
+| **Backend** | **Render** | `npm install` | `node server.js` |
+| **ML Engine** | **Hugging Face Spaces** | `pip install -r requirements.txt` | `app.py` (renamed from `app_hf.py`) |
+| **Database** | **Supabase** | N/A | PostgreSQL SQL Editor |
 
-`POST /api/predictions` body (`multipart/form-data`):
+### 1. Supabase Database Setup
+1. Create a project on [Supabase](https://supabase.com).
+2. Open **SQL Editor** → **New Query**, paste [`backend/supabase_schema.sql`](file:///c:/Users/shiva/Desktop/oil%20spill%20project%202/oil%20spill%20project/backend/supabase_schema.sql), and click **Run**.
+3. In **Table Editor** → select **`insitu_currents`** → **Insert** → **Import data from CSV**, upload [`ml_service/insitu_clean.csv`](file:///c:/Users/shiva/Desktop/oil%20spill%20project%202/oil%20spill%20project/ml_service/insitu_clean.csv) (17 MB).
 
-| Field | Required | Notes |
+### 2. Deploy ML Service on Hugging Face Spaces
+1. Create a new Space on [Hugging Face](https://huggingface.co/spaces) with SDK: **Gradio**, Hardware: **CPU Basic (16 GB RAM — Free)**.
+2. Push the contents of `ml_service/` to the Space repository.
+3. Rename `app_hf.py` to `app.py` in the Space root.
+4. Add Space Secrets:
+   - `SUPABASE_URL` = your Supabase URL
+   - `SUPABASE_SERVICE_KEY` = your Supabase key
+5. Note your public Space URL: `https://<user>-<space-name>.hf.space`.
+
+### 3. Deploy Backend on Render
+1. Create a new **Web Service** on [Render](https://render.com) connected to your repository with root directory `backend`.
+2. Add Environment Variables:
+   - `PORT` = `4000`
+   - `ML_SERVICE_URL` = `https://<user>-<space-name>.hf.space`
+   - `SUPABASE_URL` = your Supabase URL
+   - `SUPABASE_SERVICE_KEY` = your Supabase service role key
+   - `FRONTEND_URL` = `https://varunadrishti.vercel.app`
+
+### 4. Deploy Frontend on Vercel
+1. Import your repository into [Vercel](https://vercel.com) with root directory `frontend`.
+2. Set Environment Variable:
+   - `VITE_API_BASE_URL` = `https://varunadrishti-backend.onrender.com`
+3. Deploy!
+
+---
+
+## API Documentation
+
+### Node.js Backend (`/api/*`)
+
+| Method | Endpoint | Description |
 |---|---|---|
-| `file` | yes | `.SAFE.zip`/`.zip` or a plain SAR image (`.png/.jpg/.tif`) |
-| `sourceType` | yes | `"safe_zip"` or `"sar_image"` |
-| `latitude`, `longitude` | only for `sar_image` | decimal degrees |
-| `timestamp` | no | ISO 8601 UTC acquisition time |
-| `lookbackDays` | no | drift hindcast lookback, default 20 |
-| `skipAis` | no | `"true"` to skip vessel attribution |
+| `GET` | `/api/health` | Service liveness & ML engine reachability |
+| `GET` | `/api/predictions` | Query historical predictions with filters |
+| `GET` | `/api/predictions/stats/summary` | Global stats (slick area, detections, confidence) |
+| `GET` | `/api/predictions/:id` | Detailed record with candidates and map data |
+| `POST` | `/api/predictions` | Upload image / SAFE file & trigger analysis job |
+| `GET` | `/api/predictions/jobs/:jobId` | Poll 8-stage job execution progress |
+| `GET` | `/api/predictions/jobs/:jobId/stream` | Server-Sent Events (SSE) live progress stream |
+| `GET` | `/api/predictions/files/:jobId/:file` | Fetch generated masks, overlays, and trajectories |
+| `GET` | `/api/incidents` | Incident management and tracking |
+| `PATCH` | `/api/incidents/:id/status` | Update incident review status |
 
-## Notes
+---
 
-- Job state (in `ml_service/jobs.py` and the Node `jobId → predictionId`
-  map) is in-memory — fine for local dev/demo; swap for Redis/a DB before
-  running multiple workers or needing state to survive a restart.
-- `MAX_CONTENT_LENGTH`/multer limits are set generously (500 MB / 2.4 GB)
-  for large SAFE archives — tune to your infra.
-- The map's vessel/drift-origin positions come straight from the ML
-  pipeline's JSON (`result.vessel_attribution.candidates[].position`,
-  `result.drift_hindcast`, `result.drift_trajectory_points`) — these fields
-  were added to `ais_attribution.py`/`pipeline.py` in this pass, additively,
-  without touching any scoring logic.
+## License
+
+Apache 2.0 / MIT — Built for maritime environmental surveillance and conservation.
