@@ -1,4 +1,4 @@
-# VarunaDrishti (वरुणदृष्टि) 🌊🛰️
+# VarunaDrishti
 
 **AI-Powered Satellite Oil Spill Detection & Maritime Vessel Attribution Platform**
 
