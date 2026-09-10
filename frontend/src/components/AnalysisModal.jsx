@@ -42,7 +42,28 @@ export default function AnalysisModal({ jobId, meta, onComplete, onClose }) {
   );
   const [status, setStatus] = useState("queued");
   const [error, setError] = useState(null);
+  const [cancelling, setCancelling] = useState(false);
   const doneRef = useRef(false);
+
+  async function handleClose() {
+    if (error || status === "complete") {
+      onClose();
+      return;
+    }
+    if (!window.confirm("Stop this analysis? Its result will not be saved to history.")) return;
+
+    setCancelling(true);
+    doneRef.current = true;
+    try {
+      await api.cancelJob(jobId);
+    } catch (e) {
+      doneRef.current = false;
+      setCancelling(false);
+      setError(e.message || "Unable to stop the analysis.");
+      return;
+    }
+    onClose();
+  }
 
   useEffect(() => {
     doneRef.current = false;
@@ -67,6 +88,9 @@ export default function AnalysisModal({ jobId, meta, onComplete, onClose }) {
       } else if (data.status === "failed") {
         doneRef.current = true;
         setError(data.error || "Analysis failed.");
+      } else if (data.status === "cancelled") {
+        doneRef.current = true;
+        onClose();
       }
     };
 
@@ -118,14 +142,14 @@ export default function AnalysisModal({ jobId, meta, onComplete, onClose }) {
               {error ? "Analysis Failed" : "Running Analysis…"}
             </h3>
           </div>
-          {error && (
-            <button
-              onClick={onClose}
-              className="p-1 rounded-lg text-slate-subtle hover:text-slate-heading hover:bg-white/10 transition-colors"
-            >
-              <span className="material-symbols-outlined text-lg">close</span>
-            </button>
-          )}
+          <button
+            onClick={handleClose}
+            disabled={cancelling}
+            className="p-1 rounded-lg text-slate-subtle hover:text-rose-300 hover:bg-rose-500/10 disabled:opacity-60 transition-colors"
+            title={error ? "Close" : "Stop analysis"}
+          >
+            <span className="material-symbols-outlined text-lg">close</span>
+          </button>
         </div>
 
         {/* 3D scene for the currently active stage */}

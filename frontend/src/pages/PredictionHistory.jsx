@@ -45,7 +45,7 @@ export default function PredictionHistory() {
         {/* Summary Metrics */}
         {stats && (
           <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-xs hover:border-sky-300 hover:shadow-md transition-all">
+            <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-xs hover:border-cyan-500 hover:shadow-[0_0_26px_rgba(34,211,238,0.3)] transition-all duration-300">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-mono uppercase tracking-wider text-slate-500 font-semibold">
                   TOTAL ACQUISITIONS
@@ -62,7 +62,7 @@ export default function PredictionHistory() {
               </div>
             </div>
 
-            <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-xs hover:border-rose-300 hover:shadow-md transition-all">
+            <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-xs hover:border-rose-500 hover:shadow-[0_0_26px_rgba(244,63,94,0.3)] transition-all duration-300">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-mono uppercase tracking-wider text-slate-500 font-semibold">
                   CONFIRMED SLICKS
@@ -84,7 +84,7 @@ export default function PredictionHistory() {
               </div>
             </div>
 
-            <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-xs hover:border-teal-300 hover:shadow-md transition-all">
+            <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-xs hover:border-teal-500 hover:shadow-[0_0_26px_rgba(20,184,166,0.3)] transition-all duration-300">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-mono uppercase tracking-wider text-slate-500 font-semibold">
                   ATTRIBUTIONS MATCHED
@@ -105,7 +105,7 @@ export default function PredictionHistory() {
               </div>
             </div>
 
-            <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-xs hover:border-sky-300 hover:shadow-md transition-all">
+            <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-xs hover:border-amber-500 hover:shadow-[0_0_26px_rgba(245,158,11,0.3)] transition-all duration-300">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-mono uppercase tracking-wider text-slate-500 font-semibold">
                   TOTAL MONITORED AREA
@@ -228,7 +228,7 @@ export default function PredictionHistory() {
                       dateStr = String(p.acquiredAt || "—");
                     }
                     return (
-                      <tr key={p.id} className="hover:bg-slate-50/90 transition-colors group">
+                      <tr key={p.id} className="hover:bg-slate-900/90 hover:shadow-[inset_3px_0_0_#22d3ee] transition-colors group">
                         <td className="py-4 px-5">
                           <div className="flex items-center space-x-2">
                             <span
@@ -241,12 +241,12 @@ export default function PredictionHistory() {
                           <div className="text-[10px] font-mono text-slate-400 pl-4">{p.sensor || "Sentinel-1"}</div>
                         </td>
                         <td className="py-4 px-4 text-slate-700">
-                          <div className="font-medium text-slate-900">{dateStr}</div>
+                          <div className="font-medium text-slate-900 group-hover:text-slate-100">{dateStr}</div>
                           <div className="text-[11px] font-mono text-slate-400">{timeStr}</div>
                         </td>
                         <td className="py-4 px-4">
-                          <div className="text-slate-900 font-semibold">{p.region?.name || "Unknown Region"}</div>
-                          <div className="text-[10px] font-mono text-teal-700">
+                          <div className="text-slate-900 group-hover:text-slate-100 font-semibold">{p.region?.name || "Unknown Region"}</div>
+                          <div className="text-[10px] font-mono text-teal-700 group-hover:text-teal-300">
                             {p.region?.lat != null ? `${p.region.lat}°N` : "—"}, {p.region?.lon != null ? `${p.region.lon}°E` : "—"}
                           </div>
                         </td>
@@ -260,7 +260,7 @@ export default function PredictionHistory() {
                             <span>{detected ? "Detected" : "Clean"}</span>
                           </span>
                         </td>
-                        <td className="py-4 px-4 font-mono text-slate-900 font-bold">{p.slickAreaKm2} km²</td>
+                        <td className="py-4 px-4 font-mono text-slate-900 group-hover:text-white font-bold">{p.slickAreaKm2} km²</td>
                         <td className="py-4 px-4">
                           <div className="flex items-center space-x-2">
                             <span className="font-mono text-sky-800 font-bold text-xs">{p.confidence}%</span>
@@ -272,7 +272,7 @@ export default function PredictionHistory() {
                         <td className="py-4 px-4">
                           {top ? (
                             <>
-                              <div className="text-slate-900 font-semibold flex items-center gap-1.5 flex-wrap">
+                              <div className="text-slate-900 group-hover:text-slate-100 font-semibold flex items-center gap-1.5 flex-wrap">
                                 <span>{top.name}</span>
                                 {top.flag && top.flag !== "UNKNOWN" && (
                                   <span className="px-1 py-0.2 rounded bg-sky-50 border border-sky-100 text-primary font-mono text-[9px] font-bold">

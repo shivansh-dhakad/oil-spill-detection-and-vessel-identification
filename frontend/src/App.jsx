@@ -2,6 +2,7 @@ import { Routes, Route, useLocation } from "react-router-dom";
 import { AnimatePresence } from "framer-motion";
 import Header from "./components/Header.jsx";
 import AmbientField from "./components/AmbientField.jsx";
+import GradientWaves from "./components/GradientWaves.jsx";
 import PageTransition from "./components/PageTransition.jsx";
 import NewPrediction from "./pages/NewPrediction.jsx";
 import PredictionResults from "./pages/PredictionResults.jsx";
@@ -14,6 +15,28 @@ export default function App() {
 
   return (
     <div className="relative min-h-screen text-slate-body font-body antialiased">
+      <GradientWaves
+        horizonColor="#071923"
+        waveColor="#0e7490"
+        crestColor="#67e8f9"
+        speed={0.4}
+        amplitude={2.5}
+        waveScale={0.6}
+        waveRatio={0.9}
+        swell={35}
+        turbulence={20}
+        tilt={1.11}
+        zoom={1}
+        height={5.5}
+        fogDepth={15}
+        detail="medium"
+        brightness={0.9}
+        opacity={0.72}
+        mouseInteraction
+        parallaxStrength={0.5}
+        grain
+        grainIntensity={0.05}
+      />
       <AmbientField />
       <div className="relative z-10">
         <Header />

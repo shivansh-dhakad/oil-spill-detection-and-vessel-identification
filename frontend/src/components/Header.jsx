@@ -6,8 +6,6 @@ import { api } from "../api.js";
 const NAV_LINKS = [
   { to: "/", label: "Dashboard", icon: "dashboard" },
   { to: "/history", label: "History", icon: "history" },
-  { to: "/batch", label: "Batch", icon: "queue_play_next" },
-  { to: "/incidents", label: "Incidents", icon: "crisis_alert" },
 ];
 
 export default function Header() {
@@ -38,7 +36,7 @@ export default function Header() {
     try {
       if (!alert.isRead) {
         await api.markAlertRead(alert.alertId);
-        setAlerts((current) => current.map((item) => item.alertId === alert.alertId ? { ...item, isRead: 1, readAt: new Date().toISOString() } : item));
+        setAlerts((current) => current.filter((item) => item.alertId !== alert.alertId));
         setUnreadCount((count) => Math.max(0, count - 1));
       }
     } finally {

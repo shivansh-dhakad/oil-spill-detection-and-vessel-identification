@@ -74,8 +74,8 @@ export function AnalysisParametersCard() {
         <div className="rounded-xl border border-slate-100 bg-slate-50/60 p-3.5 space-y-2.5">
           <CardHeader icon="air" title="Ocean &amp; Wind Data" pill="Live" pillTone="emerald" />
           <p className="text-xs text-slate-body leading-relaxed pl-[42px]">
-            Open-Meteo supplies wave and 10m wind data, while Copernicus Marine in-situ current observations fill
-            missing ocean-current data for the backward drift hindcast.
+            Open-Meteo supplies wave & wind data, while Copernicus Marine current observations fill
+            missing current data .
           </p>
           <div className="flex flex-wrap gap-2 pl-[42px]">
             <Pill tone="slate">Current velocity &amp; direction</Pill>

@@ -133,7 +133,19 @@ export default function BatchProcessing() {
             <h1 className="text-3xl font-bold font-display text-slate-heading tracking-tight">Batch Processing</h1>
             <p className="mt-1 text-sm text-slate-subtle">Scan a Sentinel-1 folder and run every SAFE product through the live detection pipeline.</p>
           </div>
-          <Link to="/history" className="text-xs font-mono font-bold text-primary hover:text-primary-hover">VIEW PREDICTION HISTORY</Link>
+          <div className="flex items-center gap-2 flex-wrap justify-end">
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-cyan-500/10 border border-cyan-400/25 text-primary shadow-glow">
+              <span className="material-symbols-outlined text-lg">archive</span>
+              <span className="text-sm font-semibold">Sentinel-1 .SAFE.zip</span>
+            </div>
+            <Link
+              to="/"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-primary hover:bg-primary-hover hover:shadow-glow text-abyss-950 text-sm font-semibold transition-all duration-300"
+            >
+              <span className="material-symbols-outlined text-lg">add_circle</span>
+              <span>New prediction</span>
+            </Link>
+          </div>
         </div>
 
         <section className="bg-card-white rounded-2xl border border-border-soft shadow-sm p-5 md:p-6">

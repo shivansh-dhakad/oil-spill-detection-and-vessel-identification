@@ -1,4 +1,5 @@
 import { api } from "../api.js";
+import { motion } from "framer-motion";
 import VesselProximityPanel from "./VesselProximityPanel.jsx";
 
 /* ------------------------------------------------------------------ */
@@ -8,7 +9,14 @@ import VesselProximityPanel from "./VesselProximityPanel.jsx";
 
 function SectionCard({ icon, iconTone = "text-primary bg-sky-50 border-sky-100", title, subtitle, pill, children }) {
   return (
-    <section className="bg-white rounded-2xl border border-border-soft shadow-sm p-5">
+    <motion.section
+      initial={{ opacity: 0, y: 18 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true, amount: 0.12 }}
+      transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+      whileHover={{ y: -2 }}
+      className="bg-slate-900/80 rounded-2xl border border-cyan-300/15 shadow-[0_14px_40px_-24px_rgba(0,0,0,0.9)] p-5 transition-shadow duration-300 hover:border-cyan-300/35 hover:shadow-[0_18px_50px_-28px_rgba(8,145,178,0.65)]"
+    >
       <div className="flex items-start justify-between gap-3 pb-4 border-b border-slate-100">
         <div className="flex items-center gap-2.5">
           <span className={`w-9 h-9 rounded-xl border flex items-center justify-center shrink-0 ${iconTone}`}>
@@ -21,14 +29,80 @@ function SectionCard({ icon, iconTone = "text-primary bg-sky-50 border-sky-100",
         </div>
         {pill}
       </div>
-      <div className="pt-4">{children}</div>
-    </section>
+      <div className="pt-4 text-slate-300">{children}</div>
+    </motion.section>
+  );
+}
+
+function RadialDial({ value, label }) {
+  const safeValue = Math.max(0, Math.min(100, Number(value) || 0));
+  return (
+    <div
+      className="relative w-32 h-32 rounded-full p-[7px] shrink-0 shadow-[0_0_34px_rgba(34,211,238,0.18)]"
+      style={{ background: `conic-gradient(#22d3ee ${safeValue}%, rgba(148,163,184,0.16) ${safeValue}% 100%)` }}
+    >
+      <div className="relative w-full h-full rounded-full bg-[#0a1724] border border-cyan-300/20 flex flex-col items-center justify-center overflow-hidden">
+        <div className="absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-cyan-300/10 to-transparent" />
+        <span className="relative text-2xl font-bold font-display text-white tracking-tight">{safeValue}%</span>
+        <span className="relative text-[9px] font-mono uppercase tracking-[0.16em] text-cyan-200/70">{label}</span>
+      </div>
+    </div>
+  );
+}
+
+function ReportHero({ prediction, detection, drift, geometry }) {
+  const detected = prediction.detection === "detected";
+  const confidence = detection.confidencePercent ?? prediction.confidence ?? 0;
+  const coverage = detection.spillCoveragePercent != null ? `${detection.spillCoveragePercent}%` : "—";
+  const origin = drift.originLatitude != null ? `${drift.originLatitude.toFixed(3)}°, ${drift.originLongitude.toFixed(3)}°` : "Awaiting origin";
+  return (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.985 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+      className="relative overflow-hidden rounded-3xl bg-slate-900 border border-cyan-300/20 p-5 md:p-7 text-white shadow-[0_24px_70px_-32px_rgba(8,145,178,0.8)]"
+    >
+      <div className="pointer-events-none absolute inset-0 opacity-60 bg-[radial-gradient(circle_at_78%_20%,rgba(34,211,238,0.22),transparent_32%),linear-gradient(115deg,transparent_30%,rgba(45,212,191,0.08),transparent_70%)]" />
+      <div className="pointer-events-none absolute -right-16 -top-24 h-64 w-64 rounded-full border border-cyan-300/10 animate-[spin_24s_linear_infinite]" />
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-cyan-300/70 to-transparent" />
+      <div className="relative flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-cyan-200 font-mono text-[10px] font-bold tracking-[0.2em] uppercase">
+            <span className="w-2 h-2 rounded-full bg-cyan-300 shadow-[0_0_12px_#67e8f9] animate-pulse" />
+            Mission analysis // {prediction.id}
+          </div>
+          <h2 className="mt-3 text-2xl md:text-3xl font-bold font-display tracking-tight">Full Analysis Report</h2>
+          <p className="mt-2 max-w-xl text-xs md:text-sm leading-relaxed text-slate-300">
+            Complete satellite detection, environmental context, drift reconstruction, and vessel attribution record.
+          </p>
+          <div className="mt-5 flex flex-wrap gap-2">
+            <span className={`px-2.5 py-1 rounded-full border font-mono text-[10px] font-bold ${detected ? "bg-rose-400/10 border-rose-300/30 text-rose-200" : "bg-emerald-400/10 border-emerald-300/30 text-emerald-200"}`}>
+              {detected ? "OIL SPILL DETECTED" : "SCENE CLEAR"}
+            </span>
+            <span className="px-2.5 py-1 rounded-full bg-white/5 border border-white/10 text-cyan-100 font-mono text-[10px] font-bold">
+              {prediction.sensor || "SENTINEL-1"}
+            </span>
+            <span className="px-2.5 py-1 rounded-full bg-white/5 border border-white/10 text-slate-300 font-mono text-[10px] font-bold">
+              {prediction.severity || "UNCLASSIFIED"}
+            </span>
+          </div>
+        </div>
+        <div className="flex items-center gap-5 md:pr-2">
+          <RadialDial value={confidence} label="confidence" />
+          <div className="grid gap-3 min-w-[138px]">
+            <div><div className="text-[9px] font-mono uppercase tracking-wider text-slate-400">Scene coverage</div><div className="mt-0.5 text-sm font-bold text-cyan-100">{coverage}</div></div>
+            <div><div className="text-[9px] font-mono uppercase tracking-wider text-slate-400">Slick area</div><div className="mt-0.5 text-sm font-bold text-cyan-100">{geometry?.areaKm2 != null ? `${geometry.areaKm2.toFixed(2)} km²` : "—"}</div></div>
+            <div><div className="text-[9px] font-mono uppercase tracking-wider text-slate-400">Origin</div><div className="mt-0.5 text-xs font-semibold text-cyan-100 truncate" title={origin}>{origin}</div></div>
+          </div>
+        </div>
+      </div>
+    </motion.div>
   );
 }
 
 function Stat({ value, label, tone = "text-slate-900", small }) {
   return (
-    <div className="px-3 py-2.5 rounded-xl bg-slate-50 border border-slate-100 text-center">
+    <div className="px-3 py-2.5 rounded-xl bg-white/[0.04] border border-white/10 text-center transition-colors hover:bg-cyan-400/[0.08] hover:border-cyan-300/25">
       <div className={`font-mono ${small ? "text-xs" : "text-base"} font-bold leading-tight ${tone}`}>
         {value == null || value === "" ? "—" : value}
       </div>
@@ -39,9 +113,9 @@ function Stat({ value, label, tone = "text-slate-900", small }) {
 
 function InfoRow({ label, value, mono = true }) {
   return (
-    <div className="flex items-center justify-between gap-3 py-1.5 border-b border-slate-50 last:border-0">
+    <div className="flex items-center justify-between gap-3 py-1.5 border-b border-white/10 last:border-0">
       <span className="text-[11px] text-slate-400 font-medium">{label}</span>
-      <span className={`text-xs text-slate-800 font-semibold text-right ${mono ? "font-mono" : ""}`}>
+      <span className={`text-xs text-slate-100 font-semibold text-right ${mono ? "font-mono" : ""}`}>
         {value == null || value === "" ? "—" : value}
       </span>
     </div>
@@ -114,15 +188,7 @@ export default function AnalysisReport({ prediction, selectedCandidate, onSelect
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex items-center gap-2.5">
-        <span className="material-symbols-outlined text-primary text-2xl">summarize</span>
-        <div>
-          <h2 className="text-lg font-bold text-slate-900 tracking-tight">Full Analysis Report</h2>
-          <p className="text-xs text-slate-500">
-            Run #{prediction.id} · generated from the complete detection → attribution pipeline
-          </p>
-        </div>
-      </div>
+      <ReportHero prediction={prediction} detection={detection} drift={drift} geometry={geometry} />
 
       {/* ---- Source Scene ---- */}
       <SectionCard

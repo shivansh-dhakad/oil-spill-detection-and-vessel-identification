@@ -82,10 +82,20 @@ export default function NewPrediction() {
             </div>
           </div>
 
-          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-cyan-500/10 border border-cyan-400/25 text-primary shadow-glow">
-            <span className="material-symbols-outlined text-lg">archive</span>
-            <span className="text-sm font-semibold">Sentinel-1 .SAFE.zip</span>
+          <div className="flex items-center gap-2">
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-cyan-500/10 border border-cyan-400/25 text-primary shadow-glow">
+              <span className="material-symbols-outlined text-lg">archive</span>
+              <span className="text-sm font-semibold">Sentinel-1 .SAFE.zip</span>
+            </div>
+            <Link
+              to="/batch"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-primary hover:bg-primary-hover hover:shadow-glow text-abyss-950 text-sm font-semibold transition-all duration-300"
+            >
+              <span className="material-symbols-outlined text-lg">queue_play_next</span>
+              <span>Batch processing</span>
+            </Link>
           </div>
+          
         </motion.div>
 
         {/* TWO-COLUMN WORKSPACE: fills remaining height, each column scrolls internally if needed */}
@@ -186,36 +196,7 @@ export default function NewPrediction() {
               </div>
             </motion.div>
 
-            <motion.section
-              initial="hidden"
-              animate="show"
-              custom={2}
-              variants={fadeUp}
-              className="relative bg-slate-900 rounded-2xl p-5 text-white shrink-0 overflow-hidden tilt-card"
-            >
-              <div className="pointer-events-none absolute -top-10 -right-10 w-32 h-32 rounded-full bg-cyan-400/10 blur-2xl animate-floatY" />
-              <div className="relative flex items-start justify-between gap-4">
-                <div>
-                  <div className="flex items-center gap-2 text-cyan-300">
-                    <span className="material-symbols-outlined text-xl">queue_play_next</span>
-                    <span className="text-[10px] font-mono font-bold uppercase tracking-[0.16em]">Batch workspace</span>
-                  </div>
-                  <h2 className="mt-2 text-base font-bold font-display">Process a folder of SAFE products</h2>
-                  <p className="mt-1 text-xs leading-5 text-slate-300">
-                    Scan nested folders, run multiple Sentinel-1 archives, and follow progress and processing logs in one view.
-                  </p>
-                </div>
-                <span className="material-symbols-outlined text-3xl text-cyan-300 animate-floatY">folder_zip</span>
-              </div>
-              <Link
-                to="/batch"
-                className="relative mt-4 w-full py-2.5 px-4 rounded-xl bg-cyan-400 hover:bg-cyan-300 hover:shadow-glow-lg text-slate-950 flex items-center justify-center gap-2 font-mono text-xs font-bold transition-all duration-300"
-              >
-                CONVERT TO BATCH PROCESSING
-                <span className="material-symbols-outlined text-base">transform</span>
-              </Link>
-            </motion.section>
-
+            
             {/* Pipeline at a glance: model + anomaly detector, side by side */}
             <motion.div initial="hidden" animate="show" custom={3} variants={fadeUp} className="grid grid-cols-2 gap-4">
               <div className="tilt-card"><DetectionModelCard /></div>

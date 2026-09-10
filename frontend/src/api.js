@@ -1,4 +1,5 @@
-const BASE = "/api";
+const API_HOST = import.meta.env.VITE_API_BASE_URL ? import.meta.env.VITE_API_BASE_URL.replace(/\/$/, "") : "";
+const BASE = `${API_HOST}/api`;
 
 async function handle(res) {
   if (!res.ok) {
@@ -85,6 +86,9 @@ export const api = {
     ).toString();
     return fetch(`${BASE}/predictions/jobs/${jobId}${qs ? `?${qs}` : ""}`).then(handle);
   },
+
+  cancelJob: (jobId) =>
+    fetch(`${BASE}/predictions/jobs/${jobId}/cancel`, { method: "POST" }).then(handle),
 
   /**
    * Opens a live Server-Sent Events connection for job progress.
