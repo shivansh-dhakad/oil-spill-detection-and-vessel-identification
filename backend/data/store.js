@@ -106,6 +106,8 @@ function attachProximityRanking(candidates, spillCenter) {
 let predictions = [];
 
 let nextSeq = 1;
+const readAlertIds = new Set();
+const cancelledJobIds = new Set();
 
 function listPredictions({ status, minConfidence, region, search } = {}) {
   let rows = [...predictions];
@@ -142,6 +144,53 @@ function getStats() {
     totalMonitoredAreaKm2: 384200,
     totalSlickAreaKm2: +totalAreaKm2.toFixed(1),
   };
+}
+
+function listAlerts({ limit = 8 } = {}) {
+  const max = Math.max(1, Math.min(Number(limit) || 8, 50));
+  const alerts = predictions
+    .filter((prediction) => prediction.detection === "detected")
+    .sort((a, b) => new Date(b.acquiredAt) - new Date(a.acquiredAt))
+    .map((prediction) => {
+      const alertId = `ALERT-${prediction.id}`;
+      return {
+        alertId,
+        incidentId: prediction.id,
+        predictionId: prediction.id,
+        title: `Oil spill detected in ${prediction.region.name}`,
+        area: prediction.slickAreaKm2,
+        confidence: prediction.confidence ?? null,
+        isRead: readAlertIds.has(alertId) ? 1 : 0,
+        createdAt: prediction.acquiredAt,
+      };
+    });
+
+  return {
+    alerts: alerts.filter((alert) => !alert.isRead).slice(0, max),
+    unreadCount: alerts.filter((alert) => !alert.isRead).length,
+  };
+}
+
+function markAlertRead(alertId) {
+  const exists = predictions.some(
+    (prediction) => prediction.detection === "detected" && `ALERT-${prediction.id}` === alertId
+  );
+  if (!exists) return false;
+  readAlertIds.add(alertId);
+  return true;
+}
+
+function cancelPredictionJob(jobId) {
+  cancelledJobIds.add(jobId);
+  const predictionId = jobToPrediction.get(jobId);
+  if (predictionId) {
+    predictions = predictions.filter((prediction) => prediction.id !== predictionId);
+    jobToPrediction.delete(jobId);
+  }
+}
+
+function isJobCancelled(jobId) {
+  return cancelledJobIds.has(jobId);
 }
 
 // --------------------------------------------------------------------- //
@@ -535,6 +584,10 @@ async function initFromSupabase() {
 
 module.exports = {
   listPredictions,
+  listAlerts,
+  markAlertRead,
+  cancelPredictionJob,
+  isJobCancelled,
   getPrediction,
   getStats,
   createPredictionFromMlResult,

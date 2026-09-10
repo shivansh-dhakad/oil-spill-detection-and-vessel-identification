@@ -9,6 +9,8 @@ const {
   createPredictionFromMlResult,
   getPredictionIdForJob,
   linkJobToPrediction,
+  cancelPredictionJob,
+  isJobCancelled,
 } = require("../data/store");
 const mlClient = require("../data/mlClient");
 
@@ -159,6 +161,9 @@ router.post("/", (req, res, next) => {
 // `predictionId` is included so the frontend can navigate to /results/:id.
 router.get("/jobs/:jobId", async (req, res) => {
   const { jobId } = req.params;
+  if (isJobCancelled(jobId)) {
+    return res.json({ job_id: jobId, status: "cancelled", result: null, predictionId: null });
+  }
   try {
     const job = await mlClient.getJobStatus(jobId);
 
@@ -182,6 +187,19 @@ router.get("/jobs/:jobId", async (req, res) => {
     if (err.response) return res.status(err.response.status).json(err.response.data);
     console.error(`[GET /api/predictions/jobs/${jobId}] ML service unreachable:`, err.message);
     res.status(502).json({ error: "Could not reach the ML analysis service.", detail: err.message });
+  }
+});
+
+// POST /api/predictions/jobs/:jobId/cancel
+router.post("/jobs/:jobId/cancel", async (req, res) => {
+  cancelPredictionJob(req.params.jobId);
+  try {
+    res.json(await mlClient.cancelJob(req.params.jobId));
+  } catch (err) {
+    // The local cancellation marker already prevents history persistence. A
+    // worker that predates the cancel endpoint can finish in the background,
+    // but its result will still be discarded by the backend.
+    res.json({ job_id: req.params.jobId, status: "cancelled" });
   }
 });
 

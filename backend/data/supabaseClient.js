@@ -70,7 +70,7 @@ function toSupabaseRow(pred) {
     elapsed_seconds: pred.elapsedSeconds ?? pred.elapsed_seconds ?? null,
     candidates: pred.candidates || [],
     investigation_summary: pred.investigationSummary || pred.investigation_summary || {},
-    map_data: pred.mapData || pred.map_data || {},
+    map_data: pred.map || pred.mapData || pred.map_data || {},
     report: pred.report || {},
     files: pred.files || {},
   };
@@ -80,6 +80,41 @@ function toSupabaseRow(pred) {
  * Convert a Supabase row back to frontend camelCase prediction format.
  */
 function fromSupabaseRow(row) {
+  const candidates = row.candidates || [];
+  const storedMap = row.map_data && typeof row.map_data === "object" ? row.map_data : {};
+  const report = row.report && typeof row.report === "object" ? row.report : {};
+  const driftReport = report.drift && typeof report.drift === "object" ? report.drift : {};
+  const spillCenter = storedMap.spillCenter || (
+    row.region_lat != null && row.region_lon != null
+      ? { lat: row.region_lat, lon: row.region_lon }
+      : null
+  );
+  const vessels = Array.isArray(storedMap.vessels) && storedMap.vessels.length
+    ? storedMap.vessels
+    : candidates
+        .filter((candidate) => candidate.position?.latitude != null && candidate.position?.longitude != null)
+        .map((candidate) => ({
+          name: candidate.name,
+          mmsi: candidate.mmsi,
+          imo: candidate.imo || null,
+          vesselType: candidate.vesselType || null,
+          flag: candidate.flag || null,
+          probability: candidate.probability ?? null,
+          lat: candidate.position.latitude,
+          lon: candidate.position.longitude,
+          headingDeg: candidate.headingDeg ?? null,
+          speedKts: candidate.speedKts ?? null,
+          distanceKm: candidate.distanceKm ?? null,
+          proximityRank: candidate.proximityRank ?? candidate.rank ?? null,
+          proximityColor: candidate.proximityColor || null,
+          timestamp: candidate.positionTimestamp || null,
+        }));
+  const driftOrigin = storedMap.driftOrigin || (
+    driftReport.originLatitude != null && driftReport.originLongitude != null
+      ? { lat: driftReport.originLatitude, lon: driftReport.originLongitude }
+      : null
+  );
+
   return {
     id: row.id,
     jobId: row.job_id,
@@ -111,9 +146,14 @@ function fromSupabaseRow(row) {
     disclaimer: row.disclaimer,
     candidatesEvaluated: row.candidates_evaluated,
     elapsedSeconds: row.elapsed_seconds,
-    candidates: row.candidates || [],
+    candidates,
     investigationSummary: row.investigation_summary || {},
-    mapData: row.map_data || {},
+    map: {
+      ...storedMap,
+      spillCenter,
+      vessels,
+      driftOrigin,
+    },
     report: row.report || {},
     files: row.files || {},
     createdAt: row.created_at,

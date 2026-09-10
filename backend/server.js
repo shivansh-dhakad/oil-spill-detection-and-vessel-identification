@@ -8,7 +8,7 @@ const fs = require("fs");
 
 const predictionsRouter = require("./routes/predictions");
 const mlClient = require("./data/mlClient");
-const { initFromSupabase } = require("./data/store");
+const { initFromSupabase, listAlerts, markAlertRead } = require("./data/store");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -33,6 +33,17 @@ app.get("/api/health", async (req, res) => {
     time: new Date().toISOString(),
     mlService,
   });
+});
+
+app.get("/api/alerts", (req, res) => {
+  res.json(listAlerts({ limit: req.query.limit }));
+});
+
+app.patch("/api/alerts/:alertId/read", (req, res) => {
+  if (!markAlertRead(req.params.alertId)) {
+    return res.status(404).json({ error: "Alert not found" });
+  }
+  res.json({ ok: true });
 });
 
 app.use("/api/predictions", predictionsRouter);

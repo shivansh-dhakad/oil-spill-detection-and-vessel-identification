@@ -50,6 +50,11 @@ async function getJobStatus(jobId) {
   return response.data;
 }
 
+async function cancelJob(jobId) {
+  const response = await axios.post(`${ML_SERVICE_URL}/api/spill/jobs/${jobId}/cancel`);
+  return response.data;
+}
+
 /** Returns an axios stream response for SSE proxying. */
 function openJobStream(jobId) {
   return axios.get(`${ML_SERVICE_URL}/api/spill/jobs/${jobId}/stream`, {
@@ -70,4 +75,4 @@ async function health() {
   return response.data;
 }
 
-module.exports = { ML_SERVICE_URL, submitAnalysis, getJobStatus, openJobStream, openJobFile, health };
+module.exports = { ML_SERVICE_URL, submitAnalysis, getJobStatus, cancelJob, openJobStream, openJobFile, health };
