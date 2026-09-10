@@ -1,0 +1,49 @@
+services:
+  - type: web
+    name: varunadrishti-ml
+    runtime: python
+    rootDir: ml_service
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --workers 1 --bind 0.0.0.0:$PORT --timeout 300 server:app
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.10.13
+      - key: MAX_UPLOAD_MB
+        value: "3072"
+      - key: HF_MODEL_REPO_ID
+        value: shivanshdhakad/oil_spill_detection_using_unet_architecture
+      - key: HF_MODEL_FILENAME
+        value: unetpp_best.pth
+      - key: HF_MODEL_REPO_TYPE
+        value: model
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: GFW_API_TOKEN
+        sync: false
+      - key: AISSTREAM_API_KEY
+        sync: false
+
+  - type: web
+    name: varunadrishti-backend
+    runtime: node
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: ML_SERVICE_URL
+        fromService:
+          name: varunadrishti-ml
+          type: web
+          property: url
+      - key: MAX_UPLOAD_MB
+        value: "3072"
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
