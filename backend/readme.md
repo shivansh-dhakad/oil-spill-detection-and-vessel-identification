@@ -1,1 +1,15 @@
+# make a .env file and enter the keys 
+PORT=4000
+# Base URL of the Flask ML service (ml_service/server.py or HuggingFace Space)
+ML_SERVICE_URL=http://localhost:5001
+# Max upload size in MB - keep >= ml_service's MAX_UPLOAD_MB
+MAX_UPLOAD_MB=3072
+# Your Vercel frontend URL — used to restrict CORS in production
+# FRONTEND_URL=https://varunadrishti.vercel.app
+
+# ── Supabase (for database persistence) ──────────────────────────────────────
+# Persists completed predictions so history survives server restarts/redeployments.
+# Get these from: Supabase Dashboard → Project Settings → API
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_KEY=your_service_role_secret_key
 
