@@ -8,7 +8,8 @@ const fs = require("fs");
 
 const predictionsRouter = require("./routes/predictions");
 const mlClient = require("./data/mlClient");
-const { initFromSupabase, listAlerts, markAlertRead } = require("./data/store");
+const { initFromSupabase, listAlerts, markAlertRead, markAllAlertsRead } = require("./data/store");
+const supabaseClient = require("./data/supabaseClient");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -46,6 +47,11 @@ app.patch("/api/alerts/:alertId/read", (req, res) => {
   res.json({ ok: true });
 });
 
+app.patch("/api/alerts/read", (req, res) => {
+  markAllAlertsRead();
+  res.json({ ok: true });
+});
+
 app.use("/api/predictions", predictionsRouter);
 
 app.use((err, req, res, next) => {
@@ -53,8 +59,16 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: err.message || "Internal server error" });
 });
 
-// Initialize store with existing predictions from Supabase (if configured)
-initFromSupabase().finally(() => {
+// Initialize store with existing predictions from Supabase (if configured),
+// and run a real connectivity check so misconfiguration is obvious in the
+// startup log instead of surfacing later as a silent per-save failure.
+Promise.all([initFromSupabase(), supabaseClient.verifyConnection()]).then(([, check]) => {
+  if (check.ok) {
+    console.log(`[Supabase] ✅ Persistence ACTIVE - ${check.reason}`);
+  } else {
+    console.warn(`[Supabase] ⚠️  Persistence INACTIVE - ${check.reason}`);
+  }
+}).finally(() => {
   app.listen(PORT, () => {
     console.log(`VarunaDrishti API listening on http://localhost:${PORT}`);
   });

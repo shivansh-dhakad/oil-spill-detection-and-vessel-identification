@@ -106,6 +106,30 @@ function attachProximityRanking(candidates, spillCenter) {
 let predictions = [];
 
 let nextSeq = 1;
+
+/**
+ * Recomputes `nextSeq` from whatever is currently in the in-memory
+ * `predictions` array (called after Supabase hydration on startup).
+ *
+ * Without this, nextSeq always restarted at 1 after every server restart,
+ * so the first prediction created after a restart got the SAME id
+ * (PRED-2025-001) as whatever was already hydrated from Supabase. Because
+ * savePrediction() upserts with onConflict: "id", that collision silently
+ * overwrote the existing row in place instead of inserting a new one -
+ * the table's row count never grew and it looked like saves weren't
+ * happening at all.
+ */
+function recalcNextSeq() {
+  let maxSeq = 0;
+  for (const p of predictions) {
+    const match = /^PRED-\d{4}-(\d+)$/.exec(p.id || "");
+    if (match) {
+      const n = parseInt(match[1], 10);
+      if (Number.isFinite(n) && n > maxSeq) maxSeq = n;
+    }
+  }
+  nextSeq = maxSeq + 1;
+}
 const readAlertIds = new Set();
 const cancelledJobIds = new Set();
 
@@ -134,7 +158,11 @@ function getStats() {
   const total = predictions.length;
   const confirmed = predictions.filter((p) => p.detection === "detected").length;
   const attributed = predictions.filter((p) => p.candidates.some((c) => c.probability >= 50)).length;
-  const totalAreaKm2 = predictions.reduce((sum, p) => sum + (p.slickAreaKm2 || 0), 0);
+  // A clean scene has no slick, so its (stale/incorrect) area must not
+  // inflate the fleet-wide total.
+  const totalAreaKm2 = predictions
+    .filter((p) => p.detection === "detected")
+    .reduce((sum, p) => sum + (p.slickAreaKm2 || 0), 0);
   return {
     totalAcquisitions: total,
     confirmedSlicks: confirmed,
@@ -178,6 +206,12 @@ function markAlertRead(alertId) {
   if (!exists) return false;
   readAlertIds.add(alertId);
   return true;
+}
+
+function markAllAlertsRead() {
+  predictions
+    .filter((prediction) => prediction.detection === "detected")
+    .forEach((prediction) => readAlertIds.add(`ALERT-${prediction.id}`));
 }
 
 function cancelPredictionJob(jobId) {
@@ -358,12 +392,15 @@ function createPredictionFromMlResult(mlResult, { jobId, originalName, sourceTyp
   const candidates = mlCandidates.map((c, i) => mapMlCandidate(c, i + 1));
   const investigationSummary = attachProximityRanking(candidates, spillCenter);
 
-  const spillAreaKm2 =
-    mlResult.spill_geometry && mlResult.spill_geometry.area_km2 != null
-      ? +mlResult.spill_geometry.area_km2.toFixed(2)
-      : isOil
-      ? +(detectionInfo.spill_coverage_percentage || 0).toFixed(2) // fallback: coverage %, not km2 - flagged via areaIsCoveragePercent
-      : 0;
+  // "Clean" scenes must never report a slick extent - a nonzero value on a
+  // clean row (e.g. "Clean ... 4.24 km²") can only come from stale results
+  // where geometry was computed on the raw below-threshold mask (see the
+  // is_oil guard on compute_spill_geometry in ml_service/pipeline.py).
+  const spillAreaKm2 = !isOil
+    ? 0
+    : mlResult.spill_geometry && mlResult.spill_geometry.area_km2 != null
+    ? +mlResult.spill_geometry.area_km2.toFixed(2)
+    : +(detectionInfo.spill_coverage_percentage || 0).toFixed(2); // fallback: coverage %, not km2 - flagged via areaIsCoveragePercent
 
   const record = {
     id,
@@ -372,12 +409,17 @@ function createPredictionFromMlResult(mlResult, { jobId, originalName, sourceTyp
     sourceType: sourceType || (mlResult.input_type === "Sentinel-1 SAFE" ? "safe_zip" : "sar_image"),
     originalName: originalName || null,
     acquiredAt: (geo && geo.detection_timestamp_utc) || new Date().toISOString(),
-    region: { name: nearestRegionName(lat, lon), lat: lat ?? 0, lon: lon ?? 0 },
+    // null (not 0) when the scene has no real geolocation - "0°N, 0°E" is a
+    // real place (Null Island in the Gulf of Guinea), not "unknown".
+    region: { name: nearestRegionName(lat, lon), lat: lat ?? null, lon: lon ?? null },
     status: "completed",
     detection: isOil ? "detected" : "clean",
     slickAreaKm2: spillAreaKm2,
     areaIsCoveragePercent: !(mlResult.spill_geometry && mlResult.spill_geometry.area_km2 != null) && isOil,
     modelName:
+      // detection.model_name comes from the loaded checkpoint itself (see
+      // ml_service/model.py), so UNet++ runs are no longer mislabeled.
+      (detectionInfo && detectionInfo.model_name) ||
       (mlResult.report && mlResult.report.model_name) ||
       (mlResult.safe_metadata && mlResult.safe_metadata.model_name) ||
       (mlResult.model_info && mlResult.model_info.name) ||
@@ -449,6 +491,13 @@ function createPredictionFromMlResult(mlResult, { jobId, originalName, sourceTyp
           proximityRank: c.proximityRank,
           proximityColor: c.proximityColor,
           timestamp: c.positionTimestamp,
+          // Vessel's best-available position AT the estimated spill release
+          // time (see mapMlCandidate above). Without this, the dotted
+          // "origin -> vessel at spill time" line on the map has nothing to
+          // draw to - it was previously only kept on `candidates`, which
+          // Supabase round-trips (fromSupabaseRow) don't always fall back
+          // to, so the line disappeared after a page reload / DB reload.
+          positionAtSpillTime: c.positionAtSpillTime,
         })),
     },
     elapsedSeconds: mlResult.elapsed_seconds ?? null,
@@ -563,7 +612,10 @@ function linkJobToPrediction(jobId, predictionId) {
  * Hydrate predictions from Supabase on backend startup.
  */
 async function initFromSupabase() {
-  if (!supabaseClient.isSupabaseConfigured()) return;
+  if (!supabaseClient.isSupabaseConfigured()) {
+    recalcNextSeq(); // no-op (empty array) but keeps behavior explicit
+    return;
+  }
   try {
     const remote = await supabaseClient.loadPredictions(100);
     if (remote && remote.length > 0) {
@@ -579,6 +631,11 @@ async function initFromSupabase() {
     }
   } catch (err) {
     console.warn("[Store] Failed to initialize from Supabase:", err.message);
+  } finally {
+    // Run regardless of whether hydration found rows, so a completely empty
+    // table still leaves nextSeq at a sane value (1).
+    recalcNextSeq();
+    console.log(`[Store] Next prediction id will be PRED-2025-${String(nextSeq).padStart(3, "0")}.`);
   }
 }
 
@@ -586,6 +643,7 @@ module.exports = {
   listPredictions,
   listAlerts,
   markAlertRead,
+  markAllAlertsRead,
   cancelPredictionJob,
   isJobCancelled,
   getPrediction,

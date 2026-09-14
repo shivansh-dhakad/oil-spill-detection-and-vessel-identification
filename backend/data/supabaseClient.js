@@ -38,6 +38,43 @@ function isSupabaseConfigured() {
 }
 
 /**
+ * Actually talk to Supabase at startup (not just check that env vars are
+ * present) so misconfiguration - wrong project URL, wrong key, RLS blocking
+ * the service role, table missing/renamed, etc - shows up as a clear log
+ * line immediately instead of silently failing on every later save (see
+ * savePrediction()'s swallowed `console.warn`, which is easy to miss buried
+ * in request logs).
+ *
+ * Returns { ok: boolean, reason?: string }.
+ */
+async function verifyConnection() {
+  if (!supabase) {
+    return {
+      ok: false,
+      reason:
+        "SUPABASE_URL / SUPABASE_SERVICE_KEY (or SUPABASE_KEY) not set - running in in-memory mode. " +
+        "Predictions will NOT survive a server restart.",
+    };
+  }
+  try {
+    // Cheapest possible real round-trip: count rows, don't fetch any.
+    const { error, count } = await supabase
+      .from("predictions")
+      .select("id", { count: "exact", head: true });
+
+    if (error) {
+      // Common causes: wrong key (anon key instead of service_role - RLS
+      // blocks the read/write), table doesn't exist yet (run
+      // supabase_schema.sql), or wrong SUPABASE_URL/project.
+      return { ok: false, reason: `Supabase reachable but query failed: ${error.message}` };
+    }
+    return { ok: true, reason: `Connected. predictions table currently has ${count ?? "?"} row(s).` };
+  } catch (err) {
+    return { ok: false, reason: `Could not reach Supabase at ${SUPABASE_URL}: ${err.message}` };
+  }
+}
+
+/**
  * Convert an in-memory prediction record to the Supabase predictions table format.
  */
 function toSupabaseRow(pred) {
@@ -55,7 +92,11 @@ function toSupabaseRow(pred) {
     detection: pred.detection || "detected",
     confidence: pred.confidence ?? null,
     slick_area_km2: pred.slickAreaKm2 ?? pred.slick_area_km2 ?? null,
-    area_is_coverage_pct: pred.areaIsCoveragePct ?? pred.area_is_coverage_pct ?? false,
+    // NOTE: store.js's field is named `areaIsCoveragePercent` (not
+    // `areaIsCoveragePct`) - this used to only ever match the `?? false`
+    // fallback and silently wrote `false` for every row regardless of the
+    // real value.
+    area_is_coverage_pct: pred.areaIsCoveragePercent ?? pred.areaIsCoveragePct ?? pred.area_is_coverage_pct ?? false,
     model_name: pred.modelName || pred.model_name || null,
     severity: pred.severity || null,
     weather_wind_kts: pred.weather?.windKts ?? pred.weather_wind_kts ?? null,
@@ -108,6 +149,13 @@ function fromSupabaseRow(row) {
           proximityRank: candidate.proximityRank ?? candidate.rank ?? null,
           proximityColor: candidate.proximityColor || null,
           timestamp: candidate.positionTimestamp || null,
+          // Same fallback-rebuild fix as store.js's map.vessels builder:
+          // without this, rows saved before this fix (whose stored
+          // map_data.vessels lacks the field) rebuild vessels from
+          // `candidates` here but still drop positionAtSpillTime, so the
+          // dotted "origin -> vessel at spill time" line has nothing to
+          // draw to after a DB-loaded reload.
+          positionAtSpillTime: candidate.positionAtSpillTime || null,
         }));
   const driftOrigin = storedMap.driftOrigin || (
     driftReport.originLatitude != null && driftReport.originLongitude != null
@@ -176,12 +224,22 @@ async function savePrediction(pred) {
       .single();
 
     if (error) {
-      console.warn("[Supabase] Failed to save prediction:", error.message);
+      console.error(
+        `[Supabase] FAILED to persist prediction ${pred.id} - it exists only in-memory and will be ` +
+        `lost on restart. Reason: ${error.message} (code: ${error.code || "n/a"})`
+      );
+      if (error.code === "42501" || /row-level security/i.test(error.message || "")) {
+        console.error(
+          "[Supabase] This looks like an RLS policy rejection - confirm SUPABASE_SERVICE_KEY is the " +
+          "*service_role* key (not the anon/public key) from Project Settings > API."
+        );
+      }
       return null;
     }
+    console.log(`[Supabase] ✅ Saved prediction ${pred.id} (job ${pred.jobId || pred.job_id || "n/a"}).`);
     return fromSupabaseRow(data);
   } catch (err) {
-    console.warn("[Supabase] Error saving prediction:", err.message);
+    console.error(`[Supabase] Error saving prediction ${pred.id}:`, err.message);
     return null;
   }
 }
@@ -234,6 +292,7 @@ async function getPredictionById(id) {
 module.exports = {
   supabase,
   isSupabaseConfigured,
+  verifyConnection,
   savePrediction,
   loadPredictions,
   getPredictionById,
