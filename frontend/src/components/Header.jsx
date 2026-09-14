@@ -46,6 +46,16 @@ export default function Header() {
     }
   }
 
+  async function clearAlerts() {
+    try {
+      await api.markAllAlertsRead();
+      setAlerts([]);
+      setUnreadCount(0);
+    } catch {
+      // Keep the current alerts visible when the server cannot update them.
+    }
+  }
+
   return (
     <header className="fixed top-0 left-0 w-full z-50 flex items-center justify-between px-6 md:px-8 h-16 glass-panel border-b border-white/5 shadow-[0_1px_0_0_rgba(34,211,238,0.08)]">
       <Link to="/" className="flex items-center gap-3 group">
@@ -116,7 +126,18 @@ export default function Header() {
               >
                 <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between">
                   <span className="text-xs font-bold text-slate-heading">Oil Spill Alerts</span>
-                  <span className="text-[10px] font-mono text-slate-subtle">{unreadCount} UNREAD</span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-[10px] font-mono text-slate-subtle">{unreadCount} UNREAD</span>
+                    {!!alerts.length && (
+                      <button
+                        type="button"
+                        onClick={clearAlerts}
+                        className="text-[10px] font-mono font-bold text-primary hover:text-cyan-200 transition-colors"
+                      >
+                        CLEAR ALL
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <div className="max-h-80 overflow-y-auto custom-scrollbar">
                   {!alerts.length && <div className="p-6 text-center text-xs font-mono text-slate-subtle">No alerts</div>}

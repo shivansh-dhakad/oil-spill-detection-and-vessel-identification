@@ -19,6 +19,27 @@ function probLabelStyle(probability) {
   return { text: "text-slate-500", bg: "bg-slate-300" };
 }
 
+function rankBorderColor(rank) {
+  if (rank === 1) return "#7f1d1d";
+  if (rank === 2) return "#f97316";
+  if (rank === 3) return "#eab308";
+  return "#2563eb";
+}
+
+function rankGradient(rank) {
+  if (rank === 1) return "rgba(127, 29, 29, 0.28)";
+  if (rank === 2) return "rgba(249, 115, 22, 0.22)";
+  if (rank === 3) return "rgba(234, 179, 8, 0.2)";
+  return "rgba(37, 99, 235, 0.2)";
+}
+
+function rankBadgeColor(rank) {
+  if (rank === 1) return "#991b1b";
+  if (rank === 2) return "#ea580c";
+  if (rank === 3) return "#ca8a04";
+  return "#1d4ed8";
+}
+
 function tierBadge(tier) {
   if (!tier) return null;
   if (tier.includes("PROBABLE")) {
@@ -98,8 +119,12 @@ export default function PredictionResults() {
   const spillDetected = prediction.detection === "detected";
   const candidatesList = Array.isArray(prediction.candidates) ? prediction.candidates : [];
   const regionName = prediction.region?.name || "Unknown Region";
-  const regionLat = prediction.region?.lat ?? 0;
-  const regionLon = prediction.region?.lon ?? 0;
+  // null when the run has no real geolocation ("0°N, 0°E" is Null Island,
+  // not "unknown") - SpillMap falls back to a sane default center itself.
+  const regionLat = prediction.region?.lat ?? null;
+  const regionLon = prediction.region?.lon ?? null;
+  const overlayFile = prediction.files?.overlay || prediction.files?.overlayThumbnail;
+  const overlayPreviewFile = prediction.files?.overlayThumbnail || overlayFile;
 
   if (!spillDetected) {
     return (
@@ -144,9 +169,9 @@ export default function PredictionResults() {
               to trace on a clean scene.
             </p>
 
-            {prediction.files?.jobId && (prediction.files?.overlayThumbnail || prediction.files?.overlay) && (
+            {prediction.files?.jobId && overlayFile && (
               <a
-                href={api.fileUrl(prediction.files.jobId, prediction.files.overlay)}
+                href={api.fileUrl(prediction.files.jobId, overlayFile)}
                 target="_blank"
                 rel="noreferrer"
                 className="mt-5 block rounded-xl overflow-hidden border border-slate-200 bg-slate-50"
@@ -155,7 +180,7 @@ export default function PredictionResults() {
                 <img
                   src={api.fileUrl(
                     prediction.files.jobId,
-                    prediction.files.overlayThumbnail || prediction.files.overlay
+                    overlayPreviewFile
                   )}
                   alt="SAR scene (no spill detected)"
                   loading="lazy"
@@ -241,17 +266,17 @@ export default function PredictionResults() {
           </div>
 
           {/* HUD panel */}
-          <div className="absolute top-5 left-5 z-20 w-56 sm:w-64 backdrop-blur-md border border-slate-200/80 rounded-xl shadow-lg p-2.5 bg-white/80">
-            <div className="flex items-center justify-between pb-1.5 border-b border-slate-100">
+          <div className="absolute top-5 left-5 z-20 w-56 sm:w-64 backdrop-blur-md border border-cyan-400/20 rounded-xl shadow-glow-lg p-2.5 bg-slate-950/80">
+            <div className="flex items-center justify-between pb-1.5 border-b border-white/10">
               <div className="flex items-center gap-2">
                 <span className="material-symbols-outlined text-primary text-sm">air</span>
-                <span className="text-[11px] font-bold text-slate-900">Hydrodynamic Telemetry</span>
+                <span className="text-[11px] font-bold text-slate-200">Hydrodynamic Telemetry</span>
               </div>
               <span className="px-1.5 py-0.5 rounded-md bg-teal-50 text-teal-700 font-mono text-[9px] font-semibold border border-teal-100">
                 BUOY MET-09
               </span>
             </div>
-            <div className="mt-1 divide-y divide-slate-100">
+            <div className="mt-1 divide-y divide-white/10">
               <div className="flex items-center justify-between gap-3 py-1">
                 <div className="flex items-center gap-1.5 text-slate-500 min-w-0">
                   <span className="material-symbols-outlined text-xs text-slate-400">cyclone</span>
@@ -299,9 +324,9 @@ export default function PredictionResults() {
           </div>
 
           {/* Detection overlay thumbnail (real pipeline runs only) */}
-          {prediction.files?.jobId && prediction.files?.overlay && (
+          {prediction.files?.jobId && overlayFile && (
             <a
-              href={api.fileUrl(prediction.files.jobId, prediction.files.overlay)}
+              href={api.fileUrl(prediction.files.jobId, overlayFile)}
               target="_blank"
               rel="noreferrer"
               className="absolute bottom-5 left-5 z-20 group"
@@ -311,7 +336,7 @@ export default function PredictionResults() {
                 <img
                   src={api.fileUrl(
                     prediction.files.jobId,
-                    prediction.files.overlayThumbnail || prediction.files.overlay
+                    overlayPreviewFile
                   )}
                   alt="Detection overlay"
                   loading="lazy"
@@ -330,7 +355,9 @@ export default function PredictionResults() {
             <span className="text-slate-800 font-medium">
               {prediction.map?.spillCenter
                 ? `${prediction.map.spillCenter.lat.toFixed(4)}° N, ${prediction.map.spillCenter.lon.toFixed(4)}° E`
-                : `${regionLat.toFixed(4)}° N, ${regionLon.toFixed(4)}° E`}
+                : regionLat != null && regionLon != null
+                ? `${regionLat.toFixed(4)}° N, ${regionLon.toFixed(4)}° E`
+                : "—"}
             </span>
             <span className="text-slate-200">|</span>
             <span className="text-slate-500">OpenStreetMap</span>
@@ -384,11 +411,19 @@ export default function PredictionResults() {
                       <button
                         key={c.mmsi || c.name}
                         onClick={() => setSelectedCandidate(c)}
+                        style={
+                          isSelected
+                            ? {
+                                borderColor: rankBorderColor(c.rank),
+                                background: `linear-gradient(135deg, ${rankGradient(c.rank)}, rgba(17, 28, 43, 0.9))`,
+                              }
+                            : undefined
+                        }
                         className={`text-left p-3.5 rounded-xl border transition-all ${
-                          isTop
+                          isSelected
+                            ? "border-2 ring-2 ring-primary/20"
+                            : isTop
                             ? "bg-sky-50/60 border-2 border-sky-300 shadow-xs"
-                            : isSelected
-                            ? "bg-slate-50 border-slate-300 ring-2 ring-primary/20"
                             : "bg-slate-50/50 hover:bg-slate-50 border-slate-100"
                         }`}
                       >
@@ -396,8 +431,11 @@ export default function PredictionResults() {
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-1.5 flex-wrap">
                               <span
+                                style={{ backgroundColor: rankBadgeColor(c.rank) }}
                                 className={`rounded-full text-white font-mono flex items-center justify-center font-bold shadow-xs shrink-0 ${
-                                  isTop ? "w-6 h-6 bg-primary text-xs" : "w-5 h-5 bg-slate-200 !text-slate-700 text-xs"
+                                  isTop
+                                    ? "w-6 h-6 text-xs"
+                                    : "w-5 h-5 text-xs"
                                 }`}
                               >
                                 {c.rank}
@@ -711,7 +749,9 @@ export default function PredictionResults() {
               <div className="font-mono text-xs font-semibold text-slate-800">
                 {prediction.map?.spillCenter?.lat != null
                   ? `${prediction.map.spillCenter.lat.toFixed(4)}°N, ${prediction.map.spillCenter.lon.toFixed(4)}°E`
-                  : `${regionLat.toFixed(4)}°N, ${regionLon.toFixed(4)}°E`}
+                  : regionLat != null && regionLon != null
+                  ? `${regionLat.toFixed(4)}°N, ${regionLon.toFixed(4)}°E`
+                  : "—"}
               </div>
             </div>
           </div>

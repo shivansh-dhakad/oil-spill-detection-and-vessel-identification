@@ -113,8 +113,8 @@ function MapLegend() {
     { color: "#9ca3af", label: "Distance to Origin", shape: "line" },
   ];
   return (
-    <div className="absolute top-60 left-5 z-[500] bg-white/95 backdrop-blur-md border border-slate-200/80 rounded-xl shadow-lg px-3 py-2.5 text-[11px] font-mono">
-      <div className="font-bold text-slate-700 mb-1.5 text-[10px] uppercase tracking-wide">Map Legend</div>
+    <div className="absolute top-60 left-5 z-[500] bg-slate-950/85 backdrop-blur-md border border-cyan-400/20 rounded-xl shadow-glow-lg px-3 py-2.5 text-[11px] font-mono">
+      <div className="font-bold text-slate-200 mb-1.5 text-[10px] uppercase tracking-wide">Map Legend</div>
       <div className="space-y-1">
         {rows.map((r) => (
           <div key={r.label} className="flex items-center gap-2">
@@ -132,7 +132,7 @@ function MapLegend() {
               />
             )}
             {r.shape === "line" && <span className="inline-block w-3 h-0.5 shrink-0" style={{ background: r.color }} />}
-            <span className="text-slate-600">{r.label}</span>
+            <span className="text-slate-300">{r.label}</span>
           </div>
         ))}
       </div>

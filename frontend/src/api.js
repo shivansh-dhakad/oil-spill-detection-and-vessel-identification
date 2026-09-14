@@ -45,6 +45,9 @@ export const api = {
   markAlertRead: (alertId) =>
     fetch(`${BASE}/alerts/${encodeURIComponent(alertId)}/read`, { method: "PATCH" }).then(handle),
 
+  markAllAlertsRead: () =>
+    fetch(`${BASE}/alerts/read`, { method: "PATCH" }).then(handle),
+
   createBatch: ({ total, sourceName }) =>
     fetch(`${BASE}/predictions/batch`, {
       method: "POST",

@@ -260,7 +260,10 @@ export default function PredictionHistory() {
                             <span>{detected ? "Detected" : "Clean"}</span>
                           </span>
                         </td>
-                        <td className="py-4 px-4 font-mono text-slate-900 group-hover:text-white font-bold">{p.slickAreaKm2} km²</td>
+                        {/* A clean scene has no slick - never render a (stale) nonzero area on it. */}
+                        <td className="py-4 px-4 font-mono text-slate-900 group-hover:text-white font-bold">
+                          {detected && p.slickAreaKm2 != null ? `${p.slickAreaKm2} ${p.areaIsCoveragePct ? "%" : "km²"}` : "—"}
+                        </td>
                         <td className="py-4 px-4">
                           <div className="flex items-center space-x-2">
                             <span className="font-mono text-sky-800 font-bold text-xs">{p.confidence}%</span>
