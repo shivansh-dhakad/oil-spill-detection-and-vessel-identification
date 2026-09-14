@@ -84,6 +84,7 @@ def _load_safetensors_model(model_path: str, device: torch.device) -> tuple[nn.M
     model.to(device).eval()
     model._oil_spill_model_type = "segformer"  # type: ignore[attr-defined]
     model._oil_spill_input_size = 512  # type: ignore[attr-defined]
+    model._oil_spill_model_name = "SegFormer-B2 Safetensors"  # type: ignore[attr-defined]
     return model, {
         "type": "SegFormer-B2 Safetensors",
         "path": str(Path(model_path).resolve()),
@@ -117,6 +118,7 @@ def load_model(model_path: str, device: torch.device | None = None) -> tuple[nn.
     model.load_state_dict(state_dict)
     model.to(device).eval()
     model._oil_spill_model_type = "unetpp"  # type: ignore[attr-defined]
+    model._oil_spill_model_name = "UNet++ / ResNet34"  # type: ignore[attr-defined]
     # This UNet++ checkpoint was trained on 256x256 crops (see training notebook /
     # history.json), unlike the 512x512 SegFormer convention — inference must resize
     # to the same resolution or the model sees objects at the wrong scale and the

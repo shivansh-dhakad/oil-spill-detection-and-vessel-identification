@@ -348,7 +348,9 @@ def run_backward_hindcast(
         from opendrift.readers.basereader.continuous import ContinuousReader
         import pyproj
     except ImportError as exc:
-        raise RuntimeError("OpenDrift and its hydrodynamics dependencies are required.") from exc
+        raise RuntimeError(
+            f"OpenDrift hindcast dependencies could not be imported: {exc}"
+        ) from exc
 
     class OpenMeteoReader(ContinuousReader):
         def __init__(self, records: List[Dict[str, Any]]):

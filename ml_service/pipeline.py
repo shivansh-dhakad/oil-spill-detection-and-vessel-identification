@@ -245,9 +245,15 @@ def run_pipeline(
 
     is_oil = interpretation["is_oil"]
     orig_h, orig_w = original_shape[0], original_shape[1]
+    # Geometry is computed ONLY from a detection the model actually confirmed.
+    # Below-threshold pixels (fewer than min_spill_pixels at the 0.5 contour)
+    # are speckle/noise, so a "Clean" scene must not report a slick area -
+    # computing geometry on the raw mask produced rows flagged "Clean" while
+    # still showing "4.24 km²" of slick.
     spill_geometry = (
         compute_spill_geometry(interpretation["binary_mask_256"], orig_w, orig_h, safe_metadata)
-        if safe_metadata else None
+        if is_oil and safe_metadata
+        else None
     )
 
     result["detection"] = {
@@ -257,6 +263,10 @@ def run_pipeline(
         "spill_coverage_percentage": interpretation["spill_coverage_percentage"],
         "oil_pixel_count": interpretation["oil_pixel_count"],
         "total_pixels": interpretation["total_pixels"],
+        # True identity of the loaded checkpoint, so downstream records never
+        # have to guess between the UNet++ and SegFormer loaders.
+        "model_name": getattr(model, "_oil_spill_model_name", None)
+        or ("SegFormer-B2 Safetensors" if getattr(model, "_oil_spill_model_type", None) == "segformer" else "UNet++ / ResNet34"),
     }
     result["files"] = {
         "mask": os.path.basename(mask_path),

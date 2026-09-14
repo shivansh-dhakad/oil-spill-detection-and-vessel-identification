@@ -401,6 +401,7 @@ def process_single_input(
     skip_ais: bool = False,
     lookback_hours: int = DEFAULT_LOOKBACK_HOURS,
     release_hours_ago: Optional[float] = None,
+    threshold: Optional[float] = None,
 ):
     clean_path = file_path_str.strip().strip('"').strip("'")
     
@@ -442,7 +443,12 @@ def process_single_input(
 
         print("Running model...")
         prob_map = predict(model, input_tensor, device)
-        interpretation = interpret_output(prob_map, threshold=0.5)
+        effective_threshold = (
+            float(threshold) if threshold is not None
+            else float(os.environ.get("OIL_SPILL_THRESHOLD", "0.5"))
+        )
+        print(f"Decision threshold: {effective_threshold}")
+        interpretation = interpret_output(prob_map, threshold=effective_threshold)
 
         print("\nGenerating segmentation...")
         mask_path, overlay_path, _overlay_thumb_path = generate_mask_and_overlay(
@@ -659,6 +665,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--skip-ais", action="store_true", help="Skip Stage 3 vessel attribution.")
     parser.add_argument("--lookback-days", type=float, default=DEFAULT_LOOKBACK_HOURS / 24.0, help="Days of current/wind history to backtrack (default: %(default)s).")
     parser.add_argument("--release-hours-ago", type=float, default=None, help="Evidence-based release age in hours, if known.")
+    parser.add_argument("--threshold", type=float, default=None, help="Oil-class decision threshold override, in (0,1). Defaults to OIL_SPILL_THRESHOLD env var, else 0.5.")
     return parser.parse_args()
 
 
@@ -686,6 +693,7 @@ def main() -> None:
             skip_ais=args.skip_ais,
             lookback_hours=lookback_hours,
             release_hours_ago=args.release_hours_ago,
+            threshold=args.threshold,
         )
         return
 
@@ -701,6 +709,7 @@ def main() -> None:
             skip_ais=args.skip_ais,
             lookback_hours=lookback_hours,
             release_hours_ago=args.release_hours_ago,
+            threshold=args.threshold,
         )
 
 
