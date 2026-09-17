@@ -64,11 +64,11 @@ job reaches `complete`/`failed` — no message broker involved.
 
 ---
 
-## 3. The 8-Stage Pipeline (`pipeline.run_pipeline`)
+## 3. The 9-Stage Pipeline (`pipeline.run_pipeline`)
 
 `STAGE_NAMES` in `pipeline.py` defines the checklist the frontend pre-renders:
 `extraction → preprocessing → model_inference → segmentation → geolocation →
-environmental_data → drift_hindcast → vessel_attribution`.
+environmental_data → drift_hindcast → drift_forecast → vessel_attribution`.
 
 ### Stage 1 — Extraction
 - **Input type detection**: `safe_processor.is_safe_input()` checks the
@@ -85,10 +85,9 @@ environmental_data → drift_hindcast → vessel_attribution`.
 
 ### Stage 2 — Preprocessing
 `preprocessing.preprocess_image()` resizes to the **loaded model's** native
-resolution (512×512 for SegFormer, 256×256 for legacy UNet++ — read from
-`model._oil_spill_input_size`), applies ImageNet normalization, and uses the
-correct interpolation (`INTER_AREA` for SAR-derived pseudo-RGB to match
-training, `INTER_LINEAR` otherwise).
+resolution (512×512 — read from `model._oil_spill_input_size`), applies ImageNet
+normalization, and uses the correct interpolation (`INTER_AREA` for SAR-derived
+pseudo-RGB to match training, `INTER_LINEAR` otherwise).
 
 ### Stage 3 — Model Inference
 `model.predict()` runs the forward pass. For SegFormer, logits are

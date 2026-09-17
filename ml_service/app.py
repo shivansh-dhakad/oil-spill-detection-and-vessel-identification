@@ -54,27 +54,45 @@ from ais_attribution import (
     print_attribution_result,
 )
 
-# Default model path candidates
-# unetpp_best.pth (legacy UNet++ checkpoint) is preferred over the
-# .safetensors SegFormer model — put it first so it's picked up automatically.
+# Default model path candidates (prioritizing new .safetensors models)
 DEFAULT_MODEL_CANDIDATES = [
+    CURRENT_DIR / "models" / "best_model.safetensors",
+    CURRENT_DIR / "models" / "best_model.safetensor",
+    CURRENT_DIR / "models" / "model.safetensors",
+    CURRENT_DIR / "models" / "model.safetensor",
+    CURRENT_DIR / "models" / "unetpp_best.safetensors",
+    CURRENT_DIR / "models" / "best.safetensors",
+    CURRENT_DIR.parent / "models" / "best_model.safetensors",
+    CURRENT_DIR.parent / "models" / "model.safetensors",
     CURRENT_DIR / "models" / "unetpp_best.pth",
     CURRENT_DIR.parent / "models" / "unetpp_best.pth",
     CURRENT_DIR / "models" / "best.pth",
-    CURRENT_DIR / "models" / "model.safetensors",
     CURRENT_DIR / "models" / "final_statedict.pth",
-    CURRENT_DIR / "models" / "unetpp_final_statedict.pth",
-    CURRENT_DIR.parent / "models" / "unetpp_final_statedict.pth",
 ]
 
 OUTPUTS_DIR = CURRENT_DIR / "outputs"
 
 
 def get_default_model_path() -> str:
+    # 1. Direct candidate matching
     for cand in DEFAULT_MODEL_CANDIDATES:
-        if cand.exists():
+        if cand.exists() and cand.is_file():
             return str(cand)
-    return str(CURRENT_DIR / "models" / "unetpp_best.pth")
+
+    # 2. Dynamic scan in models directories for any .safetensors or .pth
+    search_dirs = [
+        CURRENT_DIR / "models",
+        CURRENT_DIR.parent / "models",
+        CURRENT_DIR,
+    ]
+    for d in search_dirs:
+        if d.is_dir():
+            for pattern in ("*.safetensors", "*.safetensor", "*.pth"):
+                found = sorted(d.glob(pattern))
+                if found:
+                    return str(found[0])
+
+    return str(CURRENT_DIR / "models" / "best_model.safetensors")
 
 
 def print_banner(device_str: str):
@@ -431,24 +449,23 @@ def process_single_input(
             input_type_label = "Satellite Image"
 
         # 2. Run Model Inference & Segmentation
-        print("Preprocessing...")
+        print("Preprocessing SAR data...")
         model_input_size = getattr(model, "_oil_spill_input_size", 512)
-        # .SAFE.zip inputs use sar_bands_to_pseudo_rgb (training-matching dB
-        # normalization) and so must resize with the same INTER_AREA method
-        # training used; plain images keep the previous INTER_LINEAR default.
-        resize_interp = SAR_RESIZE_INTERPOLATION if is_safe else DEFAULT_RESIZE_INTERPOLATION
         input_tensor = preprocess_image(
-            rgb_image, target_size=(model_input_size, model_input_size), interpolation=resize_interp
+            rgb_image, target_size=(model_input_size, model_input_size), interpolation=SAR_RESIZE_INTERPOLATION
         )
 
-        print("Running model...")
-        prob_map = predict(model, input_tensor, device)
-        effective_threshold = (
-            float(threshold) if threshold is not None
-            else float(os.environ.get("OIL_SPILL_THRESHOLD", "0.5"))
-        )
+        print("Running model with TTA...")
+        prob_map = predict(model, input_tensor, device, use_tta=True)
+        if threshold is not None:
+            effective_threshold = float(threshold)
+        elif "OIL_SPILL_THRESHOLD" in os.environ:
+            effective_threshold = float(os.environ["OIL_SPILL_THRESHOLD"])
+        else:
+            effective_threshold = getattr(model, "_oil_spill_threshold", 0.5)
+
         print(f"Decision threshold: {effective_threshold}")
-        interpretation = interpret_output(prob_map, threshold=effective_threshold)
+        interpretation = interpret_output(prob_map, threshold=effective_threshold, apply_postprocess=True)
 
         print("\nGenerating segmentation...")
         mask_path, overlay_path, _overlay_thumb_path = generate_mask_and_overlay(
@@ -635,21 +652,42 @@ def process_single_input(
             gfw_token    = os.environ.get("GFW_API_TOKEN", "").strip()
             aisstream_key = os.environ.get("AISSTREAM_API_KEY", "").strip()
 
-            attr_res = run_attribution(
-                spill_lat=spill_lat,
-                spill_lon=spill_lon,
-                detection_time_utc=detection_dt,
-                origin_estimate=origin_estimate,
-                env_time_series=env_data.get("time_series", []),
-                output_dir=str(OUTPUTS_DIR),
-                output_stem=stem,
-                gfw_api_token=gfw_token,
-                aisstream_api_key=aisstream_key,
-                search_window_hours=float(lookback_hours),
-            )
-            print_attribution_result(attr_res)
+            _AIS_TIMEOUT = 45.0
+            _attr_res: dict = {}
+            _attr_err: list = []
+
+            def _do_attribution():
+                try:
+                    res = run_attribution(
+                        spill_lat=spill_lat,
+                        spill_lon=spill_lon,
+                        detection_time_utc=detection_dt,
+                        origin_estimate=origin_estimate,
+                        env_time_series=env_data.get("time_series", []),
+                        output_dir=str(OUTPUTS_DIR),
+                        output_stem=stem,
+                        gfw_api_token=gfw_token,
+                        aisstream_api_key=aisstream_key,
+                        search_window_hours=float(lookback_hours),
+                    )
+                    _attr_res.update(res)
+                except Exception as exc:
+                    _attr_err.append(str(exc))
+
+            import threading as _t
+            _t_thread = _t.Thread(target=_do_attribution, daemon=True)
+            _t_thread.start()
+            _t_thread.join(timeout=_AIS_TIMEOUT)
+
+            if _t_thread.is_alive():
+                print(f"\n[Attribution] Timed out after {int(_AIS_TIMEOUT)}s — AIS APIs unreachable or keys invalid.")
+            elif _attr_err:
+                print(f"\n[Attribution] Failed: {_attr_err[0]}")
+            else:
+                print_attribution_result(_attr_res)
         else:
-            print("\n[Attribution] Skipped (--skip-ais flag set).")
+            print("\n[Attribution] Skipped (--skip-ais flag set.")
+
 
     except Exception as e:
         import traceback

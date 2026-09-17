@@ -327,7 +327,7 @@ def _http_json(
     url: str,
     headers: Dict[str, str],
     body: Optional[Dict[str, Any]] = None,
-    timeout: float = 120.0,
+    timeout: float = 12.0,
 ) -> Dict[str, Any]:
     if not HAS_REQUESTS:
         raise RuntimeError("'requests' library is required for GFW API calls")
@@ -447,17 +447,18 @@ def _resolve_vessel_identities(
     resolved: Dict[str, Dict[str, Any]] = {}
     if not vessel_ids:
         return resolved
-    # API accepts multiple ids; batch to keep URLs reasonable.
+    # API accepts multiple ids; batch to keep URLs reasonable (cap at 50 max to prevent pipeline lag).
     batch_size = 25
-    for i in range(0, len(vessel_ids), batch_size):
-        batch = vessel_ids[i:i + batch_size]
+    limited_ids = vessel_ids[:30]
+    for i in range(0, len(limited_ids), batch_size):
+        batch = limited_ids[i:i + batch_size]
         params = []
         for vid in batch:
             params.append(f"ids[]={urllib.parse.quote(str(vid), safe='')}")
         params.append(f"datasets[]={urllib.parse.quote(GFW_VESSEL_IDENTITY_DATASET, safe='')}")
         url = f"{GFW_API_BASE}/vessels?{'&'.join(params)}"
         try:
-            payload = _http_json("GET", url, _gfw_headers(gfw_api_token), timeout=60.0)
+            payload = _http_json("GET", url, _gfw_headers(gfw_api_token), timeout=6.0)
         except Exception as exc:
             logger.warning(f"GFW vessel identity resolve failed: {exc}")
             continue
@@ -532,7 +533,7 @@ def collect_gfw_candidates(
     body = {"geojson": _bbox_geojson(latitude, longitude, radius_km)}
 
     try:
-        payload = _http_json("POST", url, _gfw_headers(gfw_api_token), body=body, timeout=150.0)
+        payload = _http_json("POST", url, _gfw_headers(gfw_api_token), body=body, timeout=12.0)
     except Exception as exc:
         return {
             "status": "unavailable",

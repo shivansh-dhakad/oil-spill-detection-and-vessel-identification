@@ -25,6 +25,36 @@ from typing import Any, Dict, List, Optional
 from pipeline import STAGE_NAMES, run_pipeline, PipelineInputError
 
 
+from datetime import datetime, date
+
+
+def _make_json_serializable(obj: Any) -> Any:
+    """Recursively converts datetimes, Paths, numpy scalars/arrays, etc. into JSON primitives."""
+    if obj is None or isinstance(obj, (bool, int, float, str)):
+        return obj
+    if isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    if isinstance(obj, Path):
+        return str(obj)
+    if hasattr(obj, "item") and callable(obj.item):  # numpy scalar
+        try:
+            return obj.item()
+        except Exception:
+            pass
+    if hasattr(obj, "tolist") and callable(obj.tolist):  # numpy array
+        try:
+            return obj.tolist()
+        except Exception:
+            pass
+    if isinstance(obj, dict):
+        return {str(k): _make_json_serializable(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple, set)):
+        return [_make_json_serializable(v) for v in obj]
+    if hasattr(obj, "__dict__"):
+        return _make_json_serializable(obj.__dict__)
+    return str(obj)
+
+
 @dataclass
 class Stage:
     name: str
@@ -53,7 +83,7 @@ class Job:
             self.stages[name] = Stage(name=name)
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        raw = {
             "job_id": self.id,
             "status": self.status,
             "input_filename": self.input_filename,
@@ -72,6 +102,7 @@ class Job:
             "result": self.result,
             "error": self.error,
         }
+        return _make_json_serializable(raw)
 
 
 class JobManager:
@@ -140,6 +171,7 @@ class JobManager:
                 timestamp=job.params.get("timestamp"),
                 lookback_days=job.params.get("lookback_days", 5.0),
                 release_hours_ago=job.params.get("release_hours_ago"),
+                forecast_hours=job.params.get("forecast_hours", 24),
                 skip_ais=job.params.get("skip_ais", False),
                 on_stage=self._on_stage(job),
             )

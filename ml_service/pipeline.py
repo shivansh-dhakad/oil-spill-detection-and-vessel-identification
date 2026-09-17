@@ -16,10 +16,18 @@ It does not change any of the existing detection / geolocation / drift /
 attribution logic - it only reuses the functions from model.py,
 preprocessing.py, safe_processor.py, environment.py, drift.py and
 ais_attribution.py exactly as app.py did.
+
+.tif/.tiff uploads: unlike a plain non-georeferenced image (.png/.jpg/.bmp),
+a GeoTIFF frequently carries its own embedded coordinate reference system
+and acquisition timestamp. tif_processor.py reads that directly from the
+file so latitude/longitude/timestamp no longer have to be typed in by hand
+for those uploads - manual values are only required as a fallback when a
+.tif/.tiff has no usable embedded georeferencing.
 """
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 from datetime import datetime, timezone
@@ -43,9 +51,15 @@ from safe_processor import (
     extract_spill_polygon_points_geo,
     compute_spill_geometry,
 )
-from environment import fetch_environmental_history
+from tif_processor import (
+    is_tif_input,
+    extract_tif_geo_metadata,
+)
+from environment import fetch_environmental_history, fetch_environmental_forecast
 from drift import (
     run_backward_hindcast,
+    run_forward_forecast,
+    estimate_forward_forecast_summary,
     estimate_spill_origin_and_start,
     save_trajectory_csv,
     plot_trajectory_map,
@@ -55,6 +69,7 @@ from drift import (
 )
 from ais_attribution import run_attribution
 
+logger = logging.getLogger(__name__)
 
 # Stage names, in pipeline order. Used by the API layer to pre-populate a
 # "pending" checklist the frontend can render immediately after upload.
@@ -66,6 +81,7 @@ STAGE_NAMES = [
     "geolocation",
     "environmental_data",
     "drift_hindcast",
+    "drift_forecast",
     "vessel_attribution",
 ]
 
@@ -98,6 +114,22 @@ def parse_timestamp_safe(ts_str: Optional[str]) -> datetime:
         return datetime.now(timezone.utc)
 
 
+def _nearest_env_record(
+    env_time_series: list[Dict[str, Any]], target_dt: datetime
+) -> Optional[Dict[str, Any]]:
+    """Finds the environmental time-series record whose timestamp is closest
+    to target_dt. Used to attach a per-trajectory-point current/wind reading
+    (nearest-hour match, same approach drift.py's OpenMeteoReader uses
+    internally for the simulation itself) - never interpolates or fabricates
+    a value, just picks the real nearest observed/queried hour."""
+    if not env_time_series:
+        return None
+    return min(
+        env_time_series,
+        key=lambda r: abs((r["timestamp"] - target_dt).total_seconds()),
+    )
+
+
 def _fmt_latlon(lat: float, lon: float) -> Dict[str, Any]:
     return {
         "latitude": round(lat, 5),
@@ -121,6 +153,7 @@ def run_pipeline(
     timestamp: Optional[str] = None,
     lookback_days: float = 5.0,
     release_hours_ago: Optional[float] = None,
+    forecast_hours: int = 24,
     skip_ais: bool = False,
     on_stage: Optional[OnStage] = None,
 ) -> Dict[str, Any]:
@@ -157,21 +190,46 @@ def run_pipeline(
     # Stage 1: extraction / load
     # ---------------------------------------------------------------- #
     on_stage("extraction", "running", "Reading input file...")
+    tif_geo_metadata: Optional[Dict[str, Any]] = None
     try:
         if is_safe:
             rgb_image, original_shape, safe_metadata = process_safe_archive(clean_path)
         else:
+            rgb_image, original_shape = load_and_validate_image(clean_path)
+            safe_metadata = None
+
+            # .tif/.tiff uploads frequently carry their own embedded
+            # georeferencing (and sometimes an acquisition timestamp) -
+            # read it straight from the file instead of always demanding it
+            # from the caller, the way a plain non-georeferenced image
+            # (.png/.jpg/.bmp) still needs. Only fields the caller didn't
+            # already supply are filled in - an explicit lat/lon/timestamp
+            # always wins over what was auto-extracted.
+            if is_tif_input(clean_path):
+                try:
+                    tif_geo_metadata = extract_tif_geo_metadata(clean_path)
+                except Exception as tif_err:
+                    tif_geo_metadata = None
+                    logger.warning(f"[pipeline] GeoTIFF metadata extraction failed: {tif_err}")
+
+                if tif_geo_metadata:
+                    if latitude is None and tif_geo_metadata.get("latitude") is not None:
+                        latitude = tif_geo_metadata["latitude"]
+                    if longitude is None and tif_geo_metadata.get("longitude") is not None:
+                        longitude = tif_geo_metadata["longitude"]
+                    if not timestamp and tif_geo_metadata.get("timestamp") is not None:
+                        timestamp = tif_geo_metadata["timestamp"].strftime("%Y-%m-%dT%H:%M:%SZ")
+
             if latitude is None or longitude is None:
                 raise PipelineInputError(
-                    "latitude and longitude are required when uploading a plain image "
-                    "(only .SAFE / .SAFE.zip archives carry their own geolocation)."
+                    "latitude and longitude are required for this file (only .SAFE/.SAFE.zip "
+                    "archives and georeferenced .tif/.tiff files carry their own geolocation; "
+                    "this file didn't have usable embedded coordinates, so provide them manually)."
                 )
             if not (-90.0 <= float(latitude) <= 90.0):
                 raise PipelineInputError("latitude must be between -90 and 90.")
             if not (-180.0 <= float(longitude) <= 180.0):
                 raise PipelineInputError("longitude must be between -180 and 180.")
-            rgb_image, original_shape = load_and_validate_image(clean_path)
-            safe_metadata = None
     except PipelineInputError:
         on_stage("extraction", "error", "Invalid input.")
         raise
@@ -181,11 +239,25 @@ def run_pipeline(
     on_stage("extraction", "success", "Input read successfully.", {
         "input_type": result["input_type"],
         "original_shape": {"height": int(original_shape[0]), "width": int(original_shape[1])},
+        **(
+            {"geo_extracted_from_file": True}
+            if tif_geo_metadata and tif_geo_metadata.get("latitude") is not None
+            else {}
+        ),
     })
     if safe_metadata:
         result["safe_metadata"] = {
             k: v for k, v in safe_metadata.items()
             if isinstance(v, (str, int, float, bool)) or v is None
+        }
+    if tif_geo_metadata:
+        result["tif_metadata"] = {
+            "has_geotransform": tif_geo_metadata.get("has_geotransform", False),
+            "crs": tif_geo_metadata.get("crs"),
+            "bounds_wgs84": tif_geo_metadata.get("bounds_wgs84"),
+            "note": tif_geo_metadata.get("note"),
+            "geolocation_auto_extracted": tif_geo_metadata.get("latitude") is not None,
+            "timestamp_auto_extracted": tif_geo_metadata.get("timestamp") is not None,
         }
 
     # ---------------------------------------------------------------- #
@@ -194,14 +266,8 @@ def run_pipeline(
     on_stage("preprocessing", "running", "Resizing and normalizing image for the model...")
     try:
         model_input_size = getattr(model, "_oil_spill_input_size", 512)
-        # .SAFE.zip uploads now go through sar_bands_to_pseudo_rgb (see
-        # safe_processor.process_safe_archive), which matches training's
-        # pre-resize dB normalization - so the resize step here must also
-        # use training's INTER_AREA to be a faithful match. Plain-image
-        # uploads are unaffected (still INTER_LINEAR, as before).
-        resize_interp = SAR_RESIZE_INTERPOLATION if is_safe else DEFAULT_RESIZE_INTERPOLATION
         input_tensor = preprocess_image(
-            rgb_image, target_size=(model_input_size, model_input_size), interpolation=resize_interp
+            rgb_image, target_size=(model_input_size, model_input_size), interpolation=SAR_RESIZE_INTERPOLATION
         )
     except Exception as e:
         on_stage("preprocessing", "error", f"Preprocessing failed: {e}")
@@ -211,10 +277,11 @@ def run_pipeline(
     # ---------------------------------------------------------------- #
     # Stage 3: model inference
     # ---------------------------------------------------------------- #
-    on_stage("model_inference", "running", "Running segmentation model...")
+    on_stage("model_inference", "running", "Running segmentation model with TTA...")
     try:
-        prob_map = predict(model, input_tensor, device)
-        interpretation = interpret_output(prob_map, threshold=0.5)
+        optimal_threshold = getattr(model, "_oil_spill_threshold", 0.5)
+        prob_map = predict(model, input_tensor, device, use_tta=True)
+        interpretation = interpret_output(prob_map, threshold=optimal_threshold, apply_postprocess=True)
     except Exception as e:
         on_stage("model_inference", "error", f"Model inference failed: {e}")
         raise
@@ -245,15 +312,9 @@ def run_pipeline(
 
     is_oil = interpretation["is_oil"]
     orig_h, orig_w = original_shape[0], original_shape[1]
-    # Geometry is computed ONLY from a detection the model actually confirmed.
-    # Below-threshold pixels (fewer than min_spill_pixels at the 0.5 contour)
-    # are speckle/noise, so a "Clean" scene must not report a slick area -
-    # computing geometry on the raw mask produced rows flagged "Clean" while
-    # still showing "4.24 km²" of slick.
     spill_geometry = (
         compute_spill_geometry(interpretation["binary_mask_256"], orig_w, orig_h, safe_metadata)
-        if is_oil and safe_metadata
-        else None
+        if safe_metadata else None
     )
 
     result["detection"] = {
@@ -263,10 +324,6 @@ def run_pipeline(
         "spill_coverage_percentage": interpretation["spill_coverage_percentage"],
         "oil_pixel_count": interpretation["oil_pixel_count"],
         "total_pixels": interpretation["total_pixels"],
-        # True identity of the loaded checkpoint, so downstream records never
-        # have to guess between the UNet++ and SegFormer loaders.
-        "model_name": getattr(model, "_oil_spill_model_name", None)
-        or ("SegFormer-B2 Safetensors" if getattr(model, "_oil_spill_model_type", None) == "segformer" else "UNet++ / ResNet34"),
     }
     result["files"] = {
         "mask": os.path.basename(mask_path),
@@ -287,7 +344,7 @@ def run_pipeline(
     # No spill detected -> stop here, mark remaining stages skipped.
     # ---------------------------------------------------------------- #
     if not is_oil:
-        for name in ("geolocation", "environmental_data", "drift_hindcast", "vessel_attribution"):
+        for name in ("geolocation", "environmental_data", "drift_hindcast", "drift_forecast", "vessel_attribution"):
             on_stage(name, "skipped", "No oil spill detected - stage not required.")
         result["classification_status"] = "No Spill"
         result["processing_time_seconds"] = round(time.time() - start_time, 2)
@@ -361,6 +418,16 @@ def run_pipeline(
                 "provided coordinates as-is; they have NOT been verified to "
                 "be in open water."
             )
+
+        # Make it visible on the results page whenever the coordinates
+        # and/or timestamp above came from the file's own embedded metadata
+        # rather than a manual entry.
+        if tif_geo_metadata and tif_geo_metadata.get("latitude") is not None:
+            extra_note = (
+                "Coordinates and/or acquisition time were auto-extracted from this file's "
+                "embedded GeoTIFF metadata rather than entered manually."
+            )
+            geolocation_note = f"{geolocation_note} {extra_note}" if geolocation_note else extra_note
     except Exception as e:
         on_stage("geolocation", "error", f"Geolocation failed: {e}")
         raise
@@ -459,19 +526,36 @@ def run_pipeline(
             map_path = os.path.join(job_outputs_dir, f"{stem}_trajectory.png")
             plot_trajectory_map(trajectory, origin_estimate, map_path)
 
-            # Thin the trajectory down to a map-friendly point list (lat/lon/time
-            # only) so the frontend can draw the drift path directly on a
-            # Leaflet/OSM map without having to fetch and parse the CSV.
+            # Thin the trajectory down to a map-friendly point list so the
+            # frontend can draw the drift path directly on a Leaflet/OSM map
+            # without having to fetch and parse the full CSV. Each point is
+            # also enriched with the nearest ocean current / wind reading
+            # (same nearest-hour matching drift.py's simulation itself uses)
+            # and its cumulative distance from the detection point, so the
+            # frontend's trajectory table can show more than bare lat/lon -
+            # fields stay None (never fabricated) when no environmental
+            # record was available for that hour.
             _max_points = 60
             _step = max(1, len(trajectory) // _max_points)
-            result["drift_trajectory_points"] = [
-                {
+            _env_series = env_data.get("time_series", []) if isinstance(env_data, dict) else []
+            _enriched_points = []
+            for p in trajectory[::_step]:
+                _nearest_env = _nearest_env_record(_env_series, p["timestamp"])
+                _c_vel = _nearest_env.get("ocean_current_velocity_ms") if _nearest_env else None
+                _c_dir = _nearest_env.get("ocean_current_direction_deg") if _nearest_env else None
+                _w_spd = _nearest_env.get("wind_speed_ms") if _nearest_env else None
+                _w_dir = _nearest_env.get("wind_direction_deg") if _nearest_env else None
+                _enriched_points.append({
                     "latitude": round(p["latitude"], 5),
                     "longitude": round(p["longitude"], 5),
                     "time_utc": p.get("iso_time"),
-                }
-                for p in trajectory[::_step]
-            ]
+                    "ocean_current_velocity_ms": round(_c_vel, 3) if _c_vel is not None else None,
+                    "ocean_current_direction_deg": round(_c_dir, 1) if _c_dir is not None else None,
+                    "wind_speed_ms": round(_w_spd, 2) if _w_spd is not None else None,
+                    "wind_direction_deg": round(_w_dir, 1) if _w_dir is not None else None,
+                    "cumulative_distance_km": p.get("cumulative_distance_km"),
+                })
+            result["drift_trajectory_points"] = _enriched_points
         else:
             origin_estimate = {"status": "UNAVAILABLE", "reason": "No environmental time series available."}
     except Exception as drift_error:
@@ -500,43 +584,162 @@ def run_pipeline(
     )
 
     # ---------------------------------------------------------------- #
-    # Stage 8: vessel attribution (AIS)
+    # Stage 8: forward drift forecast (OpenDrift / Empirical Forward Projection)
     # ---------------------------------------------------------------- #
+    on_stage(
+        "drift_forecast",
+        "running",
+        f"Simulating forward drift projection ({forecast_hours}h)...",
+    )
+
+    forward_trajectory = None
+    forecast_summary: Dict[str, Any] = {}
+    try:
+        env_forecast = fetch_environmental_forecast(
+            latitude=spill_lat,
+            longitude=spill_lon,
+            detection_time_utc=detection_dt,
+            forecast_hours=forecast_hours,
+            fallback_conditions=env_data.get("detection_conditions") if isinstance(env_data, dict) else None,
+        )
+        if isinstance(env_forecast, dict) and env_forecast.get("time_series"):
+            forward_trajectory = run_forward_forecast(
+                spill_lat=spill_lat,
+                spill_lon=spill_lon,
+                detection_time_utc=detection_dt,
+                env_time_series=env_forecast["time_series"],
+                windage_factor=DEFAULT_WINDAGE_FACTOR,
+                forecast_hours=forecast_hours,
+            )
+
+        if forward_trajectory:
+            forecast_summary = estimate_forward_forecast_summary(
+                forward_trajectory=forward_trajectory,
+                detection_time_utc=detection_dt,
+            )
+            _fwd_env_series = env_forecast.get("time_series", []) if isinstance(env_forecast, dict) else []
+            _fwd_enriched_points = []
+            for p in forward_trajectory:
+                _fwd_nearest_env = _nearest_env_record(_fwd_env_series, p["timestamp"])
+                _c_vel = _fwd_nearest_env.get("ocean_current_velocity_ms") if _fwd_nearest_env else None
+                _c_dir = _fwd_nearest_env.get("ocean_current_direction_deg") if _fwd_nearest_env else None
+                _w_spd = _fwd_nearest_env.get("wind_speed_ms") if _fwd_nearest_env else None
+                _w_dir = _fwd_nearest_env.get("wind_direction_deg") if _fwd_nearest_env else None
+                _fwd_enriched_points.append({
+                    "latitude": round(p["latitude"], 5),
+                    "longitude": round(p["longitude"], 5),
+                    "time_utc": p.get("iso_time"),
+                    "hours_after_detection": p.get("hours_after_detection"),
+                    "ocean_current_velocity_ms": round(_c_vel, 3) if _c_vel is not None else None,
+                    "ocean_current_direction_deg": round(_c_dir, 1) if _c_dir is not None else None,
+                    "wind_speed_ms": round(_w_spd, 2) if _w_spd is not None else None,
+                    "wind_direction_deg": round(_w_dir, 1) if _w_dir is not None else None,
+                    "cumulative_distance_km": p.get("cumulative_distance_km"),
+                })
+            result["drift_forward_trajectory_points"] = _fwd_enriched_points
+            on_stage(
+                "drift_forecast",
+                "success",
+                f"Forward drift projection computed (+{forecast_hours}h).",
+                {"forecast_hours": forecast_hours, "trajectory_points": len(_fwd_enriched_points)},
+            )
+        else:
+            forecast_summary = {"status": "UNAVAILABLE", "reason": "No forecast time series available."}
+            on_stage(
+                "drift_forecast",
+                "warning",
+                "Forward drift forecast unavailable.",
+                forecast_summary,
+            )
+    except Exception as fwd_err:
+        logger.warning(f"[pipeline] Forward drift forecast failed: {fwd_err}")
+        forecast_summary = {"status": "UNAVAILABLE", "reason": str(fwd_err)}
+        on_stage(
+            "drift_forecast",
+            "warning",
+            f"Forward drift forecast unavailable: {fwd_err}",
+        )
+
+    result["drift_forecast"] = forecast_summary
+
+    # ---------------------------------------------------------------- #
+    # Stage 9: vessel attribution (AIS)
+    # ---------------------------------------------------------------- #
+    # Guard: run_attribution() makes external network calls (GFW REST API,
+    # AISStream WebSocket). Enforce a 90-second timeout so complex historical
+    # GFW searches complete without prematurely aborting.
+    _AIS_TIMEOUT_SECONDS = 90.0
+
     if skip_ais:
         on_stage("vessel_attribution", "skipped", "Vessel attribution skipped by request.")
     else:
         on_stage("vessel_attribution", "running", "Cross-referencing AIS vessel traffic...")
-        try:
-            gfw_token = os.environ.get("GFW_API_TOKEN", "").strip()
-            aisstream_key = os.environ.get("AISSTREAM_API_KEY", "").strip()
-            attr_res = run_attribution(
-                spill_lat=spill_lat,
-                spill_lon=spill_lon,
-                detection_time_utc=detection_dt,
-                origin_estimate=origin_estimate,
-                env_time_series=env_data.get("time_series", []),
-                output_dir=job_outputs_dir,
-                output_stem=stem,
-                gfw_api_token=gfw_token,
-                aisstream_api_key=aisstream_key,
-                search_window_hours=float(lookback_hours),
+
+        _attr_result: dict = {}
+        _attr_error: list = []   # mutable container so the thread can write to it
+
+        def _run_attr():
+            try:
+                gfw_token = os.environ.get("GFW_API_TOKEN", "").strip()
+                aisstream_key = os.environ.get("AISSTREAM_API_KEY", "").strip()
+                res = run_attribution(
+                    spill_lat=spill_lat,
+                    spill_lon=spill_lon,
+                    detection_time_utc=detection_dt,
+                    origin_estimate=origin_estimate,
+                    env_time_series=env_data.get("time_series", []),
+                    output_dir=job_outputs_dir,
+                    output_stem=stem,
+                    gfw_api_token=gfw_token,
+                    aisstream_api_key=aisstream_key,
+                    search_window_hours=float(lookback_hours),
+                )
+                res.pop("json_path", None)
+                _attr_result.update(res)
+            except Exception as exc:
+                _attr_error.append(str(exc))
+
+        import threading as _threading
+        _attr_thread = _threading.Thread(target=_run_attr, daemon=True)
+        _attr_thread.start()
+        _attr_thread.join(timeout=_AIS_TIMEOUT_SECONDS)
+
+        if _attr_thread.is_alive():
+            # Thread is still running (network call hanging) — skip gracefully.
+            logger.warning(
+                "[pipeline] Vessel attribution timed out after %.0fs — skipping.",
+                _AIS_TIMEOUT_SECONDS,
             )
-            # attr_res is already a JSON-serializable dict (see ais_attribution.py).
-            attr_res.pop("json_path", None)
-            result["vessel_attribution"] = attr_res
+            result["vessel_attribution"] = {
+                "status": "TIMEOUT",
+                "reason": (
+                    f"AIS lookup exceeded the {int(_AIS_TIMEOUT_SECONDS)}s time limit. "
+                    "Check that GFW_API_TOKEN / AISSTREAM_API_KEY are valid and the "
+                    "external APIs are reachable from the server."
+                ),
+            }
             on_stage(
                 "vessel_attribution",
-                "success" if attr_res.get("status") == "SUCCESS" else "warning",
-                attr_res.get("attribution_statement", "Vessel attribution complete."),
+                "warning",
+                "Vessel attribution timed out — no AIS data available within the time limit.",
+                {"status": "TIMEOUT"},
+            )
+        elif _attr_error:
+            err_msg = _attr_error[0]
+            result["vessel_attribution"] = {"status": "ERROR", "error": err_msg}
+            on_stage("vessel_attribution", "error", f"Vessel attribution failed: {err_msg}")
+        else:
+            result["vessel_attribution"] = _attr_result
+            on_stage(
+                "vessel_attribution",
+                "success" if _attr_result.get("status") == "SUCCESS" else "warning",
+                _attr_result.get("attribution_statement", "Vessel attribution complete."),
                 {
-                    "status": attr_res.get("status"),
-                    "candidates_evaluated": attr_res.get("candidates_evaluated"),
-                    "top_candidate": (attr_res.get("candidates") or [None])[0],
+                    "status": _attr_result.get("status"),
+                    "candidates_evaluated": _attr_result.get("candidates_evaluated"),
+                    "top_candidate": (_attr_result.get("candidates") or [None])[0],
                 },
             )
-        except Exception as e:
-            result["vessel_attribution"] = {"status": "ERROR", "error": str(e)}
-            on_stage("vessel_attribution", "error", f"Vessel attribution failed: {e}")
 
     result["classification_status"] = "Spill Detected"
     result["processing_time_seconds"] = round(time.time() - start_time, 2)

@@ -511,3 +511,127 @@ def fetch_environmental_history(
         "warnings": warnings,
         "insitu_current_fallback": insitu_fallback_meta,
     }
+
+
+def fetch_environmental_forecast(
+    latitude: float,
+    longitude: float,
+    detection_time_utc: datetime,
+    forecast_hours: int = 24,
+    fallback_conditions: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Fetches hourly ocean current and wind forecast data for forward drift simulation
+    covering the window [detection_time_utc, detection_time_utc + forecast_hours].
+
+    If live future forecast data is unavailable (e.g. historical imagery date
+    older than the forecast API retention window or coastal nulls), gracefully
+    extrapolates from the detection-time environmental conditions so forward
+    simulations always succeed with continuous hydrodynamic forcings.
+    """
+    client = OpenMeteoClient()
+    warnings = []
+
+    if detection_time_utc.tzinfo is None:
+        detection_time_utc = detection_time_utc.replace(tzinfo=timezone.utc)
+    else:
+        detection_time_utc = detection_time_utc.astimezone(timezone.utc)
+
+    end_time_utc = detection_time_utc + timedelta(hours=forecast_hours)
+    start_date_str = detection_time_utc.strftime("%Y-%m-%d")
+    end_date_str = end_time_utc.strftime("%Y-%m-%d")
+
+    marine_res, marine_lat_used, marine_lon_used, marine_offset_deg = (
+        client.get_ocean_currents_nearest_valid(latitude, longitude, start_date_str, end_date_str)
+    )
+    wind_res = client.get_wind_data(latitude, longitude, start_date_str, end_date_str)
+
+    hourly_marine = (marine_res or {}).get("hourly", {})
+    hourly_units_marine = (marine_res or {}).get("hourly_units", {})
+    hourly_wind = (wind_res or {}).get("hourly", {})
+
+    current_unit = hourly_units_marine.get("ocean_current_velocity", "km/h").lower()
+    marine_times = hourly_marine.get("time", [])
+    raw_current_vels = hourly_marine.get("ocean_current_velocity", [])
+    raw_current_dirs = hourly_marine.get("ocean_current_direction", [])
+    raw_wave_heights = hourly_marine.get("wave_height", [])
+
+    wind_times = hourly_wind.get("time", [])
+    raw_wind_spds = hourly_wind.get("wind_speed_10m", [])
+    raw_wind_dirs = hourly_wind.get("wind_direction_10m", [])
+
+    marine_vel_map: Dict[str, Optional[float]] = {}
+    marine_dir_map: Dict[str, Optional[float]] = {}
+    marine_wave_map: Dict[str, Optional[float]] = {}
+
+    for index, (t_str, raw_v, raw_d) in enumerate(zip(marine_times, raw_current_vels, raw_current_dirs)):
+        raw_wave = raw_wave_heights[index] if index < len(raw_wave_heights) else None
+        marine_wave_map[t_str] = float(raw_wave) if raw_wave is not None else None
+        if raw_v is not None and float(raw_v) != 0.0:
+            v_float = float(raw_v)
+            v_ms = v_float / 3.6 if current_unit in ("km/h", "kmh") else v_float
+            marine_vel_map[t_str] = v_ms
+            marine_dir_map[t_str] = float(raw_d) if raw_d is not None else None
+        else:
+            marine_vel_map[t_str] = None
+            marine_dir_map[t_str] = None
+
+    wind_spd_map: Dict[str, Optional[float]] = {}
+    wind_dir_map: Dict[str, Optional[float]] = {}
+    for t_str, raw_w_spd, raw_w_dir in zip(wind_times, raw_wind_spds, raw_wind_dirs):
+        wind_spd_map[t_str] = float(raw_w_spd) if raw_w_spd is not None else None
+        wind_dir_map[t_str] = float(raw_w_dir) if raw_w_dir is not None else None
+
+    # Determine baseline fallback values if needed
+    fb_c_vel = fallback_conditions.get("current_velocity_ms") if fallback_conditions else None
+    fb_c_dir = fallback_conditions.get("current_direction_deg") if fallback_conditions else None
+    fb_w_spd = fallback_conditions.get("wind_speed_ms") if fallback_conditions else None
+    fb_w_dir = fallback_conditions.get("wind_direction_deg") if fallback_conditions else None
+
+    time_series: List[Dict[str, Any]] = []
+    # Build complete hourly sequence for [0 .. forecast_hours]
+    for h in range(forecast_hours + 1):
+        dt = detection_time_utc + timedelta(hours=h)
+        t_str = dt.strftime("%Y-%m-%dT%H:00")
+
+        c_vel = marine_vel_map.get(t_str)
+        c_dir = marine_dir_map.get(t_str)
+        wave_height = marine_wave_map.get(t_str)
+        w_spd = wind_spd_map.get(t_str)
+        w_dir = wind_dir_map.get(t_str)
+
+        # Fallback to detection baseline when forecast API has no future point
+        if c_vel is None and fb_c_vel is not None:
+            c_vel = fb_c_vel
+            c_dir = fb_c_dir
+        if w_spd is None and fb_w_spd is not None:
+            w_spd = fb_w_spd
+            w_dir = fb_w_dir
+
+        time_series.append({
+            "timestamp": dt,
+            "iso_time": dt.strftime("%Y-%m-%d %H:%M UTC"),
+            "forecast_hour": h,
+            "ocean_current_velocity_ms": c_vel,
+            "ocean_current_direction_deg": c_dir,
+            "sea_surface_wave_significant_height_m": wave_height,
+            "wind_speed_ms": w_spd,
+            "wind_direction_deg": w_dir,
+        })
+
+    time_series.sort(key=lambda x: x["timestamp"])
+    valid_currents = sum(1 for pt in time_series if pt["ocean_current_velocity_ms"] is not None)
+    valid_winds = sum(1 for pt in time_series if pt["wind_speed_ms"] is not None)
+
+    return {
+        "available": valid_currents > 0 or valid_winds > 0,
+        "latitude": latitude,
+        "longitude": longitude,
+        "detection_time_utc": detection_time_utc,
+        "forecast_end_utc": end_time_utc,
+        "forecast_hours": forecast_hours,
+        "valid_current_count": valid_currents,
+        "valid_wind_count": valid_winds,
+        "time_series": time_series,
+        "warnings": warnings,
+    }

@@ -61,57 +61,60 @@ ALLOWED_EXTENSIONS = {".zip", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
 # (keep backend/routes/predictions.js's multer `limits.fileSize` >= this).
 MAX_CONTENT_LENGTH = int(os.environ.get("MAX_UPLOAD_MB", "3072")) * 1024 * 1024
 
-# unetpp_best.pth (legacy UNet++ checkpoint) is preferred over the
-# .safetensors SegFormer model — put it first so it's picked up automatically.
+# Prioritize new .safetensors checkpoints (e.g. best_model.safetensors)
 DEFAULT_MODEL_CANDIDATES = [
+    CURRENT_DIR / "models" / "best_model.safetensors",
+    CURRENT_DIR / "models" / "best_model.safetensor",
+    CURRENT_DIR / "models" / "model.safetensors",
+    CURRENT_DIR / "models" / "model.safetensor",
+    CURRENT_DIR / "models" / "unetpp_best.safetensors",
+    CURRENT_DIR / "models" / "best.safetensors",
+    CURRENT_DIR.parent / "models" / "best_model.safetensors",
+    CURRENT_DIR.parent / "models" / "model.safetensors",
     CURRENT_DIR / "models" / "unetpp_best.pth",
     CURRENT_DIR.parent / "models" / "unetpp_best.pth",
     CURRENT_DIR / "models" / "best.pth",
-    CURRENT_DIR / "models" / "model.safetensors",
     CURRENT_DIR / "models" / "final_statedict.pth",
 ]
-DEFAULT_HF_MODEL_REPO_ID = "shivanshdhakad/oil_spill_detection_using_unet_architecture"
-DEFAULT_HF_MODEL_FILENAME = "unetpp_best.pth"
 
 
 def get_default_model_path() -> str:
     for cand in DEFAULT_MODEL_CANDIDATES:
         if cand.exists():
             return str(cand)
-    return str(CURRENT_DIR / "models" / "unetpp_best.pth")
+    return str(CURRENT_DIR / "models" / "best_model.safetensors")
 
 
 def resolve_model_path() -> str:
     configured_path = os.environ.get("OIL_SPILL_MODEL_PATH")
     if configured_path:
-        return configured_path
+        if os.path.exists(configured_path):
+            return configured_path
+        raise FileNotFoundError(f"Configured OIL_SPILL_MODEL_PATH file not found: {configured_path}")
 
+    # 1. Direct candidate matching
     for candidate in DEFAULT_MODEL_CANDIDATES:
-        if candidate.exists():
+        if candidate.exists() and candidate.is_file():
             return str(candidate)
 
-    repo_id = os.environ.get("HF_MODEL_REPO_ID", DEFAULT_HF_MODEL_REPO_ID)
+    # 2. Dynamic scan in models directories for any .safetensors or .pth
+    search_dirs = [
+        CURRENT_DIR / "models",
+        CURRENT_DIR.parent / "models",
+        CURRENT_DIR,
+    ]
+    for d in search_dirs:
+        if d.is_dir():
+            for pattern in ("*.safetensors", "*.safetensor", "*.pth"):
+                found = sorted(d.glob(pattern))
+                if found:
+                    return str(found[0])
 
-    filename = os.environ.get("HF_MODEL_FILENAME", DEFAULT_HF_MODEL_FILENAME)
-    revision = os.environ.get("HF_MODEL_REVISION") or None
-    repo_type = os.environ.get("HF_MODEL_REPO_TYPE", "model")
-    token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_HUB_TOKEN")
-
-    try:
-        from huggingface_hub import hf_hub_download
-
-        print(f"[startup] Downloading model from Hugging Face: {repo_id}/{filename}")
-        return hf_hub_download(
-            repo_id=repo_id,
-            filename=filename,
-            repo_type=repo_type,
-            revision=revision,
-            token=token,
-        )
-    except Exception as error:
-        raise RuntimeError(
-            f"Could not download model from Hugging Face ({repo_id}/{filename}): {error}"
-        ) from error
+    searched_locations = "\n  - ".join(str(c) for c in DEFAULT_MODEL_CANDIDATES)
+    raise FileNotFoundError(
+        "No local oil spill model file found on your machine. Please place your model checkpoint "
+        f"in one of the following locations or set the OIL_SPILL_MODEL_PATH environment variable:\n  - {searched_locations}"
+    )
 
 
 # --------------------------------------------------------------------- #
@@ -230,6 +233,7 @@ def analyze():
     longitude = _parse_float(request.form.get("longitude"))
     timestamp = request.form.get("timestamp")
     lookback_days = _parse_float(request.form.get("lookback_days")) or 5.0
+    forecast_hours = int(_parse_float(request.form.get("forecast_hours")) or 24)
     release_hours_ago = _parse_float(request.form.get("release_hours_ago"))
     skip_ais = _parse_bool(request.form.get("skip_ais"), default=False)
 
@@ -248,6 +252,7 @@ def analyze():
             "longitude": longitude,
             "timestamp": timestamp,
             "lookback_days": lookback_days,
+            "forecast_hours": forecast_hours,
             "release_hours_ago": release_hours_ago,
             "skip_ais": skip_ais,
         },
@@ -278,13 +283,22 @@ def stream_job(job_id: str):
     if job is None:
         return jsonify({"error": "Unknown job_id."}), 404
 
+    def _json_default(o):
+        if hasattr(o, "isoformat"):
+            return o.isoformat()
+        if hasattr(o, "item") and callable(o.item):
+            return o.item()
+        if hasattr(o, "tolist") and callable(o.tolist):
+            return o.tolist()
+        return str(o)
+
     def _generate():
         last_payload = None
         while True:
             job_now = job_manager.get_job(job_id)
             if job_now is None:
                 break
-            payload = json.dumps(job_now.to_dict())
+            payload = json.dumps(job_now.to_dict(), default=_json_default)
             if payload != last_payload:
                 yield f"data: {payload}\n\n"
                 last_payload = payload

@@ -462,6 +462,335 @@ def run_backward_hindcast(
     return trajectory
 
 
+def calculate_bearing_deg(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Calculates compass bearing from (lat1, lon1) to (lat2, lon2) in degrees [0, 360)."""
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    delta_lon = math.radians(lon2 - lon1)
+    y = math.sin(delta_lon) * math.cos(phi2)
+    x = math.cos(phi1) * math.sin(phi2) - math.sin(phi1) * math.cos(phi2) * math.cos(delta_lon)
+    initial_bearing = math.atan2(y, x)
+    return (math.degrees(initial_bearing) + 360.0) % 360.0
+
+
+def _opendrift_result_to_forward_trajectory(
+    model: Any,
+    detection_time_utc: datetime,
+    windage_factor: float,
+    engine: str,
+) -> List[Dict[str, Any]]:
+    """Extract the single-particle forward forecast trajectory from an OpenDrift result."""
+    if not hasattr(model, "result") or model.result is None:
+        raise RuntimeError("OpenDrift produced no forward result array.")
+    try:
+        output_times = list(np.asarray(model.result.time.values).reshape(-1))
+        output_lons, output_lats = np.asarray(model.result.lon.values), np.asarray(model.result.lat.values)
+    except Exception as exc:
+        raise RuntimeError(f"OpenDrift forward result could not be read: {exc}") from exc
+    if output_lons.ndim == 2:
+        if output_lons.shape[0] == len(output_times):
+            output_lons, output_lats = output_lons[:, 0], output_lats[:, 0]
+        else:
+            output_lons, output_lats = output_lons[0, :], output_lats[0, :]
+
+    trajectory: List[Dict[str, Any]] = []
+    prior_lat, prior_lon, cumulative = None, None, 0.0
+    for step, (ts, lat, lon) in enumerate(zip(output_times, output_lats, output_lons)):
+        if not np.isfinite(lat) or not np.isfinite(lon):
+            continue
+        ts = _as_utc_datetime(ts)
+        if prior_lat is not None:
+            cumulative += haversine_distance_km(prior_lat, prior_lon, float(lat), float(lon))
+        prior_lat, prior_lon = float(lat), float(lon)
+        trajectory.append({
+            "step": step,
+            "hours_after_detection": round(max(0.0, (ts - detection_time_utc).total_seconds()) / 3600.0, 2),
+            "timestamp": ts,
+            "iso_time": ts.strftime("%Y-%m-%d %H:%M UTC"),
+            "latitude": float(lat),
+            "longitude": float(lon),
+            "windage_factor": windage_factor,
+            "cumulative_distance_km": round(cumulative, 2),
+            "simulation_engine": engine,
+        })
+    if not trajectory:
+        raise RuntimeError("OpenDrift returned no valid forward trajectory points.")
+    return trajectory
+
+
+def _run_empirical_forward_forecast(
+    spill_lat: float,
+    spill_lon: float,
+    detection_time_utc: datetime,
+    env_time_series: List[Dict[str, Any]],
+    windage_factor: float = DEFAULT_WINDAGE_FACTOR,
+    forecast_hours: int = 24,
+    time_step_hours: float = 1.0,
+) -> List[Dict[str, Any]]:
+    """
+    Empirical forward drift trajectory projection using local ocean currents and 10m winds.
+    Used as an immediate, reliable fallback when OpenDrift NetCDF readers or libraries are unavailable.
+    """
+    records = list(env_time_series)
+    trajectory: List[Dict[str, Any]] = []
+    cur_lat, cur_lon = float(spill_lat), float(spill_lon)
+    cumulative_km = 0.0
+
+    # Step 0: Detection origin
+    trajectory.append({
+        "step": 0,
+        "hours_after_detection": 0.0,
+        "timestamp": detection_time_utc,
+        "iso_time": detection_time_utc.strftime("%Y-%m-%d %H:%M UTC"),
+        "latitude": cur_lat,
+        "longitude": cur_lon,
+        "windage_factor": windage_factor,
+        "cumulative_distance_km": 0.0,
+        "simulation_engine": "Empirical Marine Current + Wind Forward Projection",
+    })
+
+    steps = int(max(1, forecast_hours / time_step_hours))
+    for step in range(1, steps + 1):
+        target_time = detection_time_utc + timedelta(hours=step * time_step_hours)
+
+        rec = None
+        if records:
+            rec = min(
+                records,
+                key=lambda r: abs((_as_utc_datetime(r["timestamp"]) - target_time).total_seconds()),
+            )
+
+        c_spd = (rec.get("ocean_current_velocity_ms") if rec else None) or 0.0
+        c_dir = (rec.get("ocean_current_direction_deg") if rec else None) or 0.0
+        w_spd = (rec.get("wind_speed_ms") if rec else None) or 0.0
+        w_dir = (rec.get("wind_direction_deg") if rec else None) or 0.0
+
+        c_u, c_v = degrees_to_components(c_spd, c_dir, is_wind=False)
+        w_u, w_v = degrees_to_components(w_spd, w_dir, is_wind=True)
+
+        tot_u = c_u + windage_factor * w_u
+        tot_v = c_v + windage_factor * w_v
+
+        dt_sec = time_step_hours * 3600.0
+        d_east_m = np.array([tot_u * dt_sec])
+        d_north_m = np.array([tot_v * dt_sec])
+
+        next_lats, next_lons = displace_coordinates_vectorized(cur_lat, cur_lon, d_east_m, d_north_m)
+        next_lat, next_lon = float(next_lats[0]), float(next_lons[0])
+
+        step_dist = haversine_distance_km(cur_lat, cur_lon, next_lat, next_lon)
+        cumulative_km += step_dist
+        cur_lat, cur_lon = next_lat, next_lon
+
+        trajectory.append({
+            "step": step,
+            "hours_after_detection": round(step * time_step_hours, 2),
+            "timestamp": target_time,
+            "iso_time": target_time.strftime("%Y-%m-%d %H:%M UTC"),
+            "latitude": cur_lat,
+            "longitude": cur_lon,
+            "windage_factor": windage_factor,
+            "cumulative_distance_km": round(cumulative_km, 2),
+            "simulation_engine": "Empirical Marine Current + Wind Forward Projection",
+            "ocean_current_velocity_ms": round(c_spd, 3) if c_spd else None,
+            "ocean_current_direction_deg": round(c_dir, 1) if c_dir else None,
+            "wind_speed_ms": round(w_spd, 2) if w_spd else None,
+            "wind_direction_deg": round(w_dir, 1) if w_dir else None,
+        })
+
+    return trajectory
+
+
+def run_forward_forecast(
+    spill_lat: float,
+    spill_lon: float,
+    detection_time_utc: datetime,
+    env_time_series: List[Dict[str, Any]],
+    windage_factor: float = DEFAULT_WINDAGE_FACTOR,
+    forecast_hours: int = 24,
+    time_step_hours: float = DEFAULT_TIME_STEP_HOURS,
+) -> List[Dict[str, Any]]:
+    """
+    Runs a forward oil-particle drift simulation from the detected location into the future.
+    Attempts OpenDrift forward hydrodynamics first; seamlessly falls back to empirical vector advection.
+    """
+    detection_time_utc = _as_utc_datetime(detection_time_utc)
+    records = list(env_time_series)
+    if not records:
+        logger.warning("[Drift] No environmental records provided for forward forecast, using empirical zero-current baseline.")
+        return _run_empirical_forward_forecast(
+            spill_lat, spill_lon, detection_time_utc, records, windage_factor, forecast_hours, time_step_hours
+        )
+
+    try:
+        from opendrift.models.oceandrift import OceanDrift
+        from opendrift.readers.basereader.continuous import ContinuousReader
+        import pyproj
+
+        class OpenMeteoForwardReader(ContinuousReader):
+            def __init__(self, records_list: List[Dict[str, Any]]):
+                self.name = "Open-Meteo Forecast Marine and Weather"
+                self.proj4 = "+proj=lonlat +datum=WGS84"
+                self.crs = pyproj.CRS(self.proj4)
+                self.variables = [
+                    "x_sea_water_velocity", "y_sea_water_velocity",
+                    "x_wind", "y_wind",
+                    "sea_surface_wave_significant_height",
+                ]
+                self.xmin, self.xmax = -180.0, 180.0
+                self.ymin, self.ymax = -90.0, 90.0
+                self.delta_x = self.delta_y = 1.0
+                self.times = sorted({
+                    _as_utc_naive(record["timestamp"])
+                    for record in records_list
+                    if isinstance(record.get("timestamp"), datetime)
+                })
+                if not self.times:
+                    raise RuntimeError("No usable forecast timestamps.")
+                self.start_time = self.times[0]
+                self.end_time = self.times[-1]
+                self.time_step = timedelta(hours=1)
+                self._records = {
+                    _as_utc_naive(record["timestamp"]): record
+                    for record in records_list
+                    if isinstance(record.get("timestamp"), datetime)
+                }
+                super().__init__()
+                self.start_time = self.times[0]
+                self.end_time = self.times[-1]
+
+            def get_variables(self, variables, time=None, x=None, y=None, z=None):
+                requested_time = _as_utc_naive(time)
+                nearest = min(self.times, key=lambda ts: abs((ts - requested_time).total_seconds()))
+                record = self._records[nearest]
+                current_speed = record.get("ocean_current_velocity_ms") or 0.0
+                current_direction = record.get("ocean_current_direction_deg") or 0.0
+                wind_speed = record.get("wind_speed_ms") or 0.0
+                wind_direction = record.get("wind_direction_deg") or 0.0
+                wave_height = record.get("sea_surface_wave_significant_height_m")
+                wave_height = float(wave_height) if wave_height is not None else 0.0
+                current_u, current_v = degrees_to_components(current_speed, current_direction)
+                wind_u, wind_v = degrees_to_components(wind_speed, wind_direction, is_wind=True)
+                count = len(np.atleast_1d(x))
+                values = {
+                    "x_sea_water_velocity": np.full(count, current_u, dtype=float),
+                    "y_sea_water_velocity": np.full(count, current_v, dtype=float),
+                    "x_wind": np.full(count, wind_u, dtype=float),
+                    "y_wind": np.full(count, wind_v, dtype=float),
+                    "sea_surface_wave_significant_height": np.full(count, wave_height, dtype=float),
+                }
+                return {variable: values[variable] for variable in variables}
+
+        record_times = [_as_utc_datetime(record["timestamp"]) for record in records]
+        nearest_index = min(
+            range(len(records)),
+            key=lambda index: abs((record_times[index] - detection_time_utc).total_seconds()),
+        )
+        if detection_time_utc not in record_times:
+            detection_record = dict(records[nearest_index])
+            detection_record["timestamp"] = detection_time_utc
+            records.append(detection_record)
+
+        reader = OpenMeteoForwardReader(records)
+        model = OceanDrift(loglevel=20)
+        model.add_reader(reader)
+        model.set_config("general:coastline_action", "previous")
+        model.set_config("drift:vertical_mixing", False)
+        model.set_config("seed:wind_drift_factor", windage_factor)
+        model.seed_elements(
+            lon=spill_lon, lat=spill_lat, z=0, radius=0, number=1,
+            time=_as_utc_naive(detection_time_utc),
+        )
+        model.run(
+            duration=timedelta(hours=forecast_hours),
+            time_step=timedelta(hours=time_step_hours),
+            time_step_output=timedelta(hours=time_step_hours),
+            stop_on_error=False,
+        )
+
+        engine_name = "OpenDrift Hydrodynamics (Forward Simulation) + Open-Meteo currents/wind"
+        trajectory = _opendrift_result_to_forward_trajectory(
+            model, detection_time_utc, windage_factor, engine_name
+        )
+        trajectory[-1]["final_particle_location"] = {
+            "latitude": trajectory[-1]["latitude"],
+            "longitude": trajectory[-1]["longitude"],
+            "timestamp": trajectory[-1]["iso_time"],
+        }
+        return trajectory
+
+    except Exception as exc:
+        logger.warning(f"[Drift] OpenDrift forward simulation failed ({exc}), falling back to empirical forward advection.")
+        return _run_empirical_forward_forecast(
+            spill_lat, spill_lon, detection_time_utc, records, windage_factor, forecast_hours, time_step_hours
+        )
+
+
+def estimate_forward_forecast_summary(
+    forward_trajectory: List[Dict[str, Any]],
+    detection_time_utc: datetime,
+) -> Dict[str, Any]:
+    """
+    Summarizes key parameters and waypoints of the forward drift forecast.
+    """
+    if not forward_trajectory:
+        return {
+            "status": "UNAVAILABLE",
+            "reason": "No forward trajectory points generated.",
+        }
+
+    start_pt = forward_trajectory[0]
+    final_pt = forward_trajectory[-1]
+    forecast_hours = final_pt.get("hours_after_detection", 0.0)
+    total_distance_km = final_pt.get("cumulative_distance_km", 0.0)
+
+    bearing_deg = calculate_bearing_deg(
+        start_pt["latitude"], start_pt["longitude"],
+        final_pt["latitude"], final_pt["longitude"],
+    )
+
+    avg_speed_knots = 0.0
+    if forecast_hours > 0:
+        avg_speed_kmh = total_distance_km / forecast_hours
+        avg_speed_knots = round(avg_speed_kmh * 0.539957, 2)
+
+    waypoints: List[Dict[str, Any]] = []
+    # Extract checkpoints at ~6h, 12h, 18h, 24h, etc.
+    target_checkpoints = [6, 12, 18, 24, 36, 48]
+    for chk in target_checkpoints:
+        if chk <= forecast_hours:
+            pt = min(forward_trajectory, key=lambda p: abs(p.get("hours_after_detection", 0.0) - chk))
+            waypoints.append({
+                "checkpoint_hour": chk,
+                "iso_time": pt.get("iso_time"),
+                "latitude": round(pt["latitude"], 4),
+                "longitude": round(pt["longitude"], 4),
+                "cumulative_distance_km": pt.get("cumulative_distance_km", 0.0),
+            })
+
+    return {
+        "status": "COMPLETED",
+        "forecast_hours": forecast_hours,
+        "forecast_start_utc": start_pt["timestamp"],
+        "forecast_start_str": start_pt["iso_time"],
+        "forecast_end_utc": final_pt["timestamp"],
+        "forecast_end_str": final_pt["iso_time"],
+        "origin_latitude": round(float(start_pt["latitude"]), 4),
+        "origin_longitude": round(float(start_pt["longitude"]), 4),
+        "final_latitude": round(float(final_pt["latitude"]), 4),
+        "final_longitude": round(float(final_pt["longitude"]), 4),
+        "total_distance_km": round(total_distance_km, 2),
+        "drift_bearing_deg": round(bearing_deg, 1),
+        "average_drift_speed_knots": avg_speed_knots,
+        "simulation_engine": start_pt.get("simulation_engine", "OpenDrift / Empirical Forward"),
+        "trajectory_points_count": len(forward_trajectory),
+        "waypoints": waypoints,
+        "disclaimer": (
+            "FORECAST ESTIMATE: Predicted trajectory is based on hydrodynamic current & wind "
+            "forecast models. Actual trajectory may vary due to sub-grid turbulence and localized weather."
+        ),
+    }
+
+
 def _water_points(trajectory: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Keep only trajectory samples that the landmask classifies as ocean using fast vectorized lookup."""
     if not trajectory:
