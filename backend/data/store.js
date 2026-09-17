@@ -106,32 +106,19 @@ function attachProximityRanking(candidates, spillCenter) {
 let predictions = [];
 
 let nextSeq = 1;
-
-/**
- * Recomputes `nextSeq` from whatever is currently in the in-memory
- * `predictions` array (called after Supabase hydration on startup).
- *
- * Without this, nextSeq always restarted at 1 after every server restart,
- * so the first prediction created after a restart got the SAME id
- * (PRED-2025-001) as whatever was already hydrated from Supabase. Because
- * savePrediction() upserts with onConflict: "id", that collision silently
- * overwrote the existing row in place instead of inserting a new one -
- * the table's row count never grew and it looked like saves weren't
- * happening at all.
- */
-function recalcNextSeq() {
-  let maxSeq = 0;
-  for (const p of predictions) {
-    const match = /^PRED-\d{4}-(\d+)$/.exec(p.id || "");
-    if (match) {
-      const n = parseInt(match[1], 10);
-      if (Number.isFinite(n) && n > maxSeq) maxSeq = n;
-    }
-  }
-  nextSeq = maxSeq + 1;
-}
 const readAlertIds = new Set();
 const cancelledJobIds = new Set();
+
+// Sort key used everywhere the history/alerts list needs "most recent
+// first": the moment the analysis actually completed and was recorded
+// (createdAt), NOT the satellite's acquisitionAt timestamp - a scene
+// acquired weeks ago but only just processed should still show up at the
+// top of the history table, since that's when the analyst actually did the
+// work. Falls back to acquiredAt for any legacy record that predates the
+// createdAt field.
+function byAnalysisTimeDesc(a, b) {
+  return new Date(b.createdAt || b.acquiredAt) - new Date(a.createdAt || a.acquiredAt);
+}
 
 function listPredictions({ status, minConfidence, region, search } = {}) {
   let rows = [...predictions];
@@ -147,7 +134,7 @@ function listPredictions({ status, minConfidence, region, search } = {}) {
         p.candidates.some((c) => c.name.toLowerCase().includes(q) || c.mmsi.includes(q))
     );
   }
-  return rows.sort((a, b) => new Date(b.acquiredAt) - new Date(a.acquiredAt));
+  return rows.sort(byAnalysisTimeDesc);
 }
 
 function getPrediction(id) {
@@ -158,11 +145,7 @@ function getStats() {
   const total = predictions.length;
   const confirmed = predictions.filter((p) => p.detection === "detected").length;
   const attributed = predictions.filter((p) => p.candidates.some((c) => c.probability >= 50)).length;
-  // A clean scene has no slick, so its (stale/incorrect) area must not
-  // inflate the fleet-wide total.
-  const totalAreaKm2 = predictions
-    .filter((p) => p.detection === "detected")
-    .reduce((sum, p) => sum + (p.slickAreaKm2 || 0), 0);
+  const totalAreaKm2 = predictions.reduce((sum, p) => sum + (p.slickAreaKm2 || 0), 0);
   return {
     totalAcquisitions: total,
     confirmedSlicks: confirmed,
@@ -178,7 +161,7 @@ function listAlerts({ limit = 8 } = {}) {
   const max = Math.max(1, Math.min(Number(limit) || 8, 50));
   const alerts = predictions
     .filter((prediction) => prediction.detection === "detected")
-    .sort((a, b) => new Date(b.acquiredAt) - new Date(a.acquiredAt))
+    .sort(byAnalysisTimeDesc)
     .map((prediction) => {
       const alertId = `ALERT-${prediction.id}`;
       return {
@@ -374,6 +357,7 @@ function createPredictionFromMlResult(mlResult, { jobId, originalName, sourceTyp
   const envConditions = mlResult.environmental_conditions || {};
   const env = envConditions.detection_conditions || {};
   const drift = mlResult.drift_hindcast || {};
+  const driftForecast = mlResult.drift_forecast || null;
   const safeMetadata = mlResult.safe_metadata || null;
   const spillGeometry = mlResult.spill_geometry || null;
   const attribution = mlResult.vessel_attribution || null;
@@ -392,15 +376,12 @@ function createPredictionFromMlResult(mlResult, { jobId, originalName, sourceTyp
   const candidates = mlCandidates.map((c, i) => mapMlCandidate(c, i + 1));
   const investigationSummary = attachProximityRanking(candidates, spillCenter);
 
-  // "Clean" scenes must never report a slick extent - a nonzero value on a
-  // clean row (e.g. "Clean ... 4.24 km²") can only come from stale results
-  // where geometry was computed on the raw below-threshold mask (see the
-  // is_oil guard on compute_spill_geometry in ml_service/pipeline.py).
-  const spillAreaKm2 = !isOil
-    ? 0
-    : mlResult.spill_geometry && mlResult.spill_geometry.area_km2 != null
-    ? +mlResult.spill_geometry.area_km2.toFixed(2)
-    : +(detectionInfo.spill_coverage_percentage || 0).toFixed(2); // fallback: coverage %, not km2 - flagged via areaIsCoveragePercent
+  const spillAreaKm2 =
+    mlResult.spill_geometry && mlResult.spill_geometry.area_km2 != null
+      ? +mlResult.spill_geometry.area_km2.toFixed(2)
+      : isOil
+      ? +(detectionInfo.spill_coverage_percentage || 0).toFixed(2) // fallback: coverage %, not km2 - flagged via areaIsCoveragePercent
+      : 0;
 
   const record = {
     id,
@@ -409,17 +390,18 @@ function createPredictionFromMlResult(mlResult, { jobId, originalName, sourceTyp
     sourceType: sourceType || (mlResult.input_type === "Sentinel-1 SAFE" ? "safe_zip" : "sar_image"),
     originalName: originalName || null,
     acquiredAt: (geo && geo.detection_timestamp_utc) || new Date().toISOString(),
-    // null (not 0) when the scene has no real geolocation - "0°N, 0°E" is a
-    // real place (Null Island in the Gulf of Guinea), not "unknown".
-    region: { name: nearestRegionName(lat, lon), lat: lat ?? null, lon: lon ?? null },
+    // When this record was actually created by the backend (i.e. when the
+    // analysis finished) - distinct from acquiredAt (the satellite's own
+    // acquisition time, which can be weeks old for a backlog run). This is
+    // what history/alerts now sort by, so "most recent" means "most
+    // recently analyzed", not "most recently sensed".
+    createdAt: new Date().toISOString(),
+    region: { name: nearestRegionName(lat, lon), lat: lat ?? 0, lon: lon ?? 0 },
     status: "completed",
     detection: isOil ? "detected" : "clean",
     slickAreaKm2: spillAreaKm2,
     areaIsCoveragePercent: !(mlResult.spill_geometry && mlResult.spill_geometry.area_km2 != null) && isOil,
     modelName:
-      // detection.model_name comes from the loaded checkpoint itself (see
-      // ml_service/model.py), so UNet++ runs are no longer mislabeled.
-      (detectionInfo && detectionInfo.model_name) ||
       (mlResult.report && mlResult.report.model_name) ||
       (mlResult.safe_metadata && mlResult.safe_metadata.model_name) ||
       (mlResult.model_info && mlResult.model_info.name) ||
@@ -473,7 +455,33 @@ function createPredictionFromMlResult(mlResult, { jobId, originalName, sourceTyp
         lat: p.latitude,
         lon: p.longitude,
         time: p.time_utc,
+        // Nearest-hour ocean current / wind reading at this trajectory
+        // point (see pipeline.py's _nearest_env_record) - null when no
+        // environmental record was available for that hour, never a
+        // fabricated 0.
+        currentSpeedMs: p.ocean_current_velocity_ms ?? null,
+        currentDirectionDeg: p.ocean_current_direction_deg ?? null,
+        windSpeedMs: p.wind_speed_ms ?? null,
+        windDirectionDeg: p.wind_direction_deg ?? null,
+        // Cumulative distance traveled backward from the detection point
+        // along the drift path, in km (drift.py's cumulative_distance_km).
+        distanceFromDetectionKm: p.cumulative_distance_km ?? null,
       })),
+      forwardTrajectoryPoints: (mlResult.drift_forward_trajectory_points || []).map((p) => ({
+        lat: p.latitude,
+        lon: p.longitude,
+        time: p.time_utc,
+        hoursAfterDetection: p.hours_after_detection ?? null,
+        currentSpeedMs: p.ocean_current_velocity_ms ?? null,
+        currentDirectionDeg: p.ocean_current_direction_deg ?? null,
+        windSpeedMs: p.wind_speed_ms ?? null,
+        windDirectionDeg: p.wind_direction_deg ?? null,
+        distanceFromDetectionKm: p.cumulative_distance_km ?? null,
+      })),
+      forwardFinalParticle:
+        driftForecast && driftForecast.final_latitude != null
+          ? { lat: driftForecast.final_latitude, lon: driftForecast.final_longitude }
+          : null,
       vessels: candidates
         .filter((c) => c.position)
         .map((c) => ({
@@ -580,8 +588,46 @@ function createPredictionFromMlResult(mlResult, { jobId, originalName, sourceTyp
         insituPlatformId: drift.insitu_platform_id || null,
         insituDistanceKm: drift.insitu_distance_km ?? null,
       },
+      driftForecast: driftForecast
+        ? {
+            status: driftForecast.status || null,
+            reason: driftForecast.reason || null,
+            simulationEngine: driftForecast.simulation_engine || null,
+            forecastHours: driftForecast.forecast_hours ?? 24,
+            totalDistanceKm: driftForecast.total_distance_km ?? null,
+            driftBearingDeg: driftForecast.drift_bearing_deg ?? null,
+            averageDriftSpeedKnots: driftForecast.average_drift_speed_knots ?? null,
+            originLatitude: driftForecast.origin_latitude ?? (geo ? geo.latitude : null),
+            originLongitude: driftForecast.origin_longitude ?? (geo ? geo.longitude : null),
+            forecastStartStr: driftForecast.forecast_start_str || null,
+            finalLatitude: driftForecast.final_latitude ?? null,
+            finalLongitude: driftForecast.final_longitude ?? null,
+            forecastEndStr: driftForecast.forecast_end_str || null,
+            waypoints: driftForecast.waypoints || [],
+            disclaimer: driftForecast.disclaimer || null,
+          }
+        : null,
       geolocationNote: (geo && geo.note) || null,
     },
+    driftForecast: driftForecast
+      ? {
+          status: driftForecast.status || null,
+          reason: driftForecast.reason || null,
+          simulationEngine: driftForecast.simulation_engine || null,
+          forecastHours: driftForecast.forecast_hours ?? 24,
+          totalDistanceKm: driftForecast.total_distance_km ?? null,
+          driftBearingDeg: driftForecast.drift_bearing_deg ?? null,
+          averageDriftSpeedKnots: driftForecast.average_drift_speed_knots ?? null,
+          originLatitude: driftForecast.origin_latitude ?? (geo ? geo.latitude : null),
+          originLongitude: driftForecast.origin_longitude ?? (geo ? geo.longitude : null),
+          forecastStartStr: driftForecast.forecast_start_str || null,
+          finalLatitude: driftForecast.final_latitude ?? null,
+          finalLongitude: driftForecast.final_longitude ?? null,
+          forecastEndStr: driftForecast.forecast_end_str || null,
+          waypoints: driftForecast.waypoints || [],
+          disclaimer: driftForecast.disclaimer || null,
+        }
+      : null,
   };
 
   predictions.unshift(record);
@@ -612,10 +658,7 @@ function linkJobToPrediction(jobId, predictionId) {
  * Hydrate predictions from Supabase on backend startup.
  */
 async function initFromSupabase() {
-  if (!supabaseClient.isSupabaseConfigured()) {
-    recalcNextSeq(); // no-op (empty array) but keeps behavior explicit
-    return;
-  }
+  if (!supabaseClient.isSupabaseConfigured()) return;
   try {
     const remote = await supabaseClient.loadPredictions(100);
     if (remote && remote.length > 0) {
@@ -627,15 +670,10 @@ async function initFromSupabase() {
           if (p.jobId) jobToPrediction.set(p.jobId, p.id);
         }
       }
-      predictions.sort((a, b) => new Date(b.acquiredAt) - new Date(a.acquiredAt));
+      predictions.sort(byAnalysisTimeDesc);
     }
   } catch (err) {
     console.warn("[Store] Failed to initialize from Supabase:", err.message);
-  } finally {
-    // Run regardless of whether hydration found rows, so a completely empty
-    // table still leaves nextSeq at a sane value (1).
-    recalcNextSeq();
-    console.log(`[Store] Next prediction id will be PRED-2025-${String(nextSeq).padStart(3, "0")}.`);
   }
 }
 

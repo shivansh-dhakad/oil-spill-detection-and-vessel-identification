@@ -6,7 +6,7 @@
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js",
+    "dev": "node --watch --watch-path=server.js --watch-path=routes --watch-path=data server.js",
     "upload:currents": "node scripts/upload_currents_to_supabase.js"
   },
   "dependencies": {

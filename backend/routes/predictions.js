@@ -42,6 +42,16 @@ const upload = multer({
   limits: { fileSize: MAX_UPLOAD_MB * 1024 * 1024 },
 });
 
+// .tif/.tiff uploads frequently carry their own embedded georeferencing
+// (and sometimes an acquisition timestamp) - the ML service (tif_processor.py)
+// reads that straight from the file, so this route shouldn't force the user
+// to re-enter coordinates for those uploads the way a plain non-georeferenced
+// image (.png/.jpg/.bmp) still needs. If a .tif turns out to have no usable
+// embedded geolocation, the ML service itself reports a clear 400 explaining
+// that manual coordinates are needed - this route just doesn't block it
+// up front on a guess.
+const GEO_CAPABLE_IMAGE_EXTENSIONS = new Set([".tif", ".tiff"]);
+
 /** Best-effort cleanup of the temp upload once it's been handed to Flask (or failed to be). */
 function cleanupUpload(filePath) {
   if (!filePath) return;
@@ -75,11 +85,15 @@ router.get("/:id", (req, res) => {
 // ----------------------------------------------------------------------- //
 
 // POST /api/predictions  (multipart/form-data)
-//   file            (required) - .SAFE.zip / .zip archive, or a plain SAR image
+//   file            (required) - .SAFE.zip / .zip archive, a Sentinel-1
+//                                 georeferenced .tif/.tiff, or a plain SAR image
 //   sourceType      "safe_zip" | "sar_image"
 //   sensor          display label, e.g. "Sentinel-1A IW"
-//   latitude, longitude   required when sourceType === "sar_image"
-//   timestamp             optional ISO 8601 UTC acquisition time
+//   latitude, longitude   required for non-georeferenced images (.png/.jpg/.bmp);
+//                          optional for .tif/.tiff (auto-extracted server-side
+//                          when the file carries embedded georeferencing)
+//   timestamp             optional ISO 8601 UTC acquisition time - also
+//                          auto-extracted from .tif/.tiff metadata when present
 //   lookbackDays          optional, default 20
 //   skipAis               optional "true"/"false"
 //
@@ -104,15 +118,20 @@ router.post("/", (req, res, next) => {
     if (!req.file) {
       return res.status(400).json({ error: "No file provided (field name must be 'file')." });
     }
-    const { sourceType, sensor, latitude, longitude, timestamp, lookbackDays, skipAis } = req.body;
+    const { sourceType, sensor, latitude, longitude, timestamp, lookbackDays, forecastHours, skipAis } = req.body;
+
+    const uploadedExt = path.extname(req.file.originalname || "").toLowerCase();
+    const isGeoCapableImage = GEO_CAPABLE_IMAGE_EXTENSIONS.has(uploadedExt);
 
     if (
       sourceType === "sar_image" &&
+      !isGeoCapableImage &&
       (latitude === undefined || longitude === undefined || latitude === "" || longitude === "")
     ) {
       return res.status(400).json({
         error:
-          "latitude and longitude are required for a plain SAR image upload (SAFE archives carry their own geolocation).",
+          "latitude and longitude are required for this image type (SAFE archives and georeferenced " +
+          ".tif/.tiff files carry their own geolocation).",
       });
     }
 
@@ -126,6 +145,7 @@ router.post("/", (req, res, next) => {
           longitude,
           timestamp,
           lookback_days: lookbackDays,
+          forecast_hours: forecastHours,
           skip_ais: skipAis,
         },
       });
@@ -233,6 +253,63 @@ router.get("/files/:jobId/:filename", async (req, res) => {
   } catch (err) {
     res.status(err.response?.status || 404).json({ error: "File not found." });
   }
+});
+
+// ----------------------------------------------------------------------- //
+// Batch Processing In-Memory State & Endpoints
+// ----------------------------------------------------------------------- //
+const batches = new Map();
+
+// POST /api/predictions/batch
+router.post("/batch", (req, res) => {
+  const { total = 0, sourceName = "Batch folder" } = req.body;
+  const batchId = `BATCH-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const batchRecord = {
+    id: batchId,
+    sourceName,
+    total: Number(total) || 0,
+    processed: 0,
+    percentage: 0,
+    status: "running",
+    logs: [],
+    createdAt: new Date().toISOString(),
+  };
+  batches.set(batchId, batchRecord);
+  res.status(201).json(batchRecord);
+});
+
+// GET /api/predictions/batch/:batchId
+router.get("/batch/:batchId", (req, res) => {
+  const batch = batches.get(req.params.batchId);
+  if (!batch) {
+    return res.status(404).json({ error: "Batch not found" });
+  }
+  res.json(batch);
+});
+
+// POST /api/predictions/batch/:batchId/logs
+router.post("/batch/:batchId/logs", (req, res) => {
+  const batch = batches.get(req.params.batchId);
+  if (!batch) {
+    return res.status(404).json({ error: "Batch not found" });
+  }
+  const entry = { ...req.body, timestamp: new Date().toISOString() };
+  
+  // Replace or add log entry
+  const existingIdx = batch.logs.findIndex((l) => l.fileName === entry.fileName);
+  if (existingIdx >= 0) {
+    batch.logs[existingIdx] = entry;
+  } else {
+    batch.logs.unshift(entry);
+  }
+
+  const finishedCount = batch.logs.filter((l) => l.status === "completed" || l.status === "skipped").length;
+  batch.processed = finishedCount;
+  batch.percentage = batch.total > 0 ? Math.min(100, Math.round((finishedCount / batch.total) * 100)) : 100;
+  if (batch.processed >= batch.total && batch.total > 0) {
+    batch.status = "complete";
+  }
+  res.json(batch);
 });
 
 module.exports = router;

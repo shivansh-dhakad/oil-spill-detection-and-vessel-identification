@@ -27,6 +27,7 @@ async function submitAnalysis({ filePath, fileName, fields }) {
     "longitude",
     "timestamp",
     "lookback_days",
+    "forecast_hours",
     "release_hours_ago",
     "skip_ais",
   ];
