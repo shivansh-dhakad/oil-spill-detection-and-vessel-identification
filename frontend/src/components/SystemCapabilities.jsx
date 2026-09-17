@@ -136,8 +136,8 @@ export function DetectionModelCard() {
       </p>
       <div className="grid grid-cols-3 gap-2 mt-3">
         <Stat value="512²" label="Input Size" />
-        <Stat value="~26.1M" label="Param" />
-        <Stat value="85.8%" label="Val IoU" />
+        <Stat value="~31.8M" label="Param" />
+        <Stat value="87.06%" label="Val IoU" />
       </div>
     </section>
   );

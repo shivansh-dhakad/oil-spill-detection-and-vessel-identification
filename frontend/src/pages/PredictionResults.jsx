@@ -118,6 +118,26 @@ export default function PredictionResults() {
   const sev = severityBadge(prediction.severity);
   const spillDetected = prediction.detection === "detected";
   const candidatesList = Array.isArray(prediction.candidates) ? prediction.candidates : [];
+
+  function selectVesselByMmsi(mmsiOrVessel) {
+    if (!mmsiOrVessel) return;
+    if (typeof mmsiOrVessel === "object") {
+      const targetMmsi = mmsiOrVessel.mmsi || mmsiOrVessel.vesselId;
+      const match = candidatesList.find(
+        (c) => (targetMmsi && (String(c.mmsi) === String(targetMmsi) || String(c.vesselId) === String(targetMmsi)))
+      );
+      setSelectedCandidate(match || mmsiOrVessel);
+      return;
+    }
+    const mmsiStr = String(mmsiOrVessel);
+    const match = candidatesList.find(
+      (c) => String(c.mmsi) === mmsiStr || String(c.vesselId) === mmsiStr
+    );
+    if (match) {
+      setSelectedCandidate(match);
+    }
+  }
+
   const regionName = prediction.region?.name || "Unknown Region";
   // null when the run has no real geolocation ("0°N, 0°E" is Null Island,
   // not "unknown") - SpillMap falls back to a sane default center itself.
@@ -170,7 +190,8 @@ export default function PredictionResults() {
             </p>
 
             {prediction.files?.jobId && overlayFile && (
-              <a
+                <a
+              
                 href={api.fileUrl(prediction.files.jobId, overlayFile)}
                 target="_blank"
                 rel="noreferrer"
@@ -259,6 +280,8 @@ export default function PredictionResults() {
               spillPolygon={prediction.map?.spillPolygon || []}
               driftOrigin={prediction.map?.driftOrigin || null}
               trajectoryPoints={prediction.map?.trajectoryPoints || []}
+              forwardTrajectoryPoints={prediction.map?.forwardTrajectoryPoints || []}
+              forwardFinalParticle={prediction.map?.forwardFinalParticle || null}
               vessels={prediction.map?.vessels || []}
               selectedVessel={selectedCandidate}
               fallbackCenter={{ lat: regionLat, lon: regionLon }}
@@ -325,7 +348,7 @@ export default function PredictionResults() {
 
           {/* Detection overlay thumbnail (real pipeline runs only) */}
           {prediction.files?.jobId && overlayFile && (
-            <a
+              <a
               href={api.fileUrl(prediction.files.jobId, overlayFile)}
               target="_blank"
               rel="noreferrer"
@@ -681,10 +704,7 @@ export default function PredictionResults() {
         <AnalysisReport
           prediction={prediction}
           selectedCandidate={selectedCandidate}
-          onSelectVessel={(v) => {
-            const full = candidatesList.find((c) => c.mmsi && c.mmsi === v.mmsi);
-            setSelectedCandidate(full || selectedCandidate);
-          }}
+          onSelectVessel={selectVesselByMmsi}
         />
       </div>
 

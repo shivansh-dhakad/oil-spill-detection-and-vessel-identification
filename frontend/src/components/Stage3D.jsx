@@ -217,7 +217,37 @@ function StageScene({ stage, running, toneClass, failed }) {
               style={{ animation: "s3d-trail 3s linear infinite", animationPlayState: play }}
             />
           </svg>
-          <span className={`material-symbols-outlined absolute top-1.5 right-1.5 text-base ${toneClass}`}>waves</span>
+          <span className={`material-symbols-outlined absolute top-1.5 right-1.5 text-base ${toneClass}`}>history</span>
+        </div>
+      );
+
+    case "drift_forecast":
+      return (
+        <div className="relative preserve-3d" style={{ width: 90, height: 64 }}>
+          {[0, 1, 2].map((i) => (
+            <div
+              key={i}
+              className="absolute inset-x-2 rounded-sm bg-teal-400/10 border-t border-teal-300/30"
+              style={{
+                top: 10 + i * 12,
+                height: 10,
+                animation: `s3d-wave 2.4s ease-in-out infinite`,
+                animationDelay: `${i * 0.25}s`,
+                animationPlayState: play,
+              }}
+            />
+          ))}
+          <svg viewBox="0 0 90 64" className="absolute inset-0 w-full h-full overflow-visible">
+            <path
+              d="M14 50 C 30 40, 50 10, 78 14"
+              fill="none"
+              stroke="rgba(45,212,191,0.65)"
+              strokeWidth="1.5"
+              strokeDasharray="4 4"
+              style={{ animation: "s3d-trail 3s linear infinite", animationPlayState: play }}
+            />
+          </svg>
+          <span className={`material-symbols-outlined absolute top-1.5 right-1.5 text-base ${toneClass}`}>trending_up</span>
         </div>
       );
 

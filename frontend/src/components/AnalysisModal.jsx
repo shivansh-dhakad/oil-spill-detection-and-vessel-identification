@@ -11,6 +11,7 @@ const STAGE_META = {
   geolocation: { label: "Resolving Coordinates", icon: "location_on" },
   environmental_data: { label: "Fetching Ocean & Wind Data", icon: "air" },
   drift_hindcast: { label: "Backward Drift Hindcast", icon: "waves" },
+  drift_forecast: { label: "Forward Drift Forecasting", icon: "trending_up" },
   vessel_attribution: { label: "Cross-Referencing AIS", icon: "directions_boat" },
 };
 const STAGE_ORDER = Object.keys(STAGE_META);
@@ -182,7 +183,7 @@ export default function AnalysisModal({ jobId, meta, onComplete, onClose }) {
           </div>
         )}
 
-        <div className="space-y-1.5 max-h-56 overflow-y-auto custom-scrollbar">
+        <div className="space-y-1.5 max-h-64 overflow-y-auto custom-scrollbar">
           {STAGE_ORDER.map((name) => {
             const stage = stages[name] || { status: "pending" };
             const m = STAGE_META[name];

@@ -16,6 +16,17 @@ const fadeUp = {
   }),
 };
 
+// .tif/.tiff uploads are treated as "sar_image" sources - the ML service
+// (tif_processor.py) reads embedded GeoTIFF georeferencing and acquisition
+// time straight from the file itself, so no manual coordinate entry is
+// needed here. .SAFE/.SAFE.zip archives keep their own richer geolocation
+// and stay "safe_zip".
+function inferSourceType(file) {
+  const name = (file?.name || "").toLowerCase();
+  if (name.endsWith(".tif") || name.endsWith(".tiff")) return "sar_image";
+  return "safe_zip";
+}
+
 export default function NewPrediction() {
   const [file, setFile] = useState(null);
   const [dragOver, setDragOver] = useState(false);
@@ -28,7 +39,7 @@ export default function NewPrediction() {
   const inputRef = useRef(null);
   const navigate = useNavigate();
 
-  const accept = ".zip,.SAFE";
+  const accept = ".zip,.SAFE,.tif,.tiff";
 
   function handleFiles(fileList) {
     if (fileList && fileList[0]) {
@@ -45,7 +56,7 @@ export default function NewPrediction() {
     setSubmitting(true);
     setError(null);
     try {
-      const sourceType = "safe_zip";
+      const sourceType = inferSourceType(file);
       const sensor = "Sentinel-1A IW";
       const { jobId } = await api.createPrediction({
         file,
@@ -85,7 +96,7 @@ export default function NewPrediction() {
           <div className="flex items-center gap-2">
             <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-cyan-500/10 border border-cyan-400/25 text-primary shadow-glow">
               <span className="material-symbols-outlined text-lg">archive</span>
-              <span className="text-sm font-semibold">Sentinel-1 .SAFE.zip</span>
+              <span className="text-sm font-semibold">SAFE.zip / GeoTIFF</span>
             </div>
             <Link
               to="/batch"
@@ -134,14 +145,15 @@ export default function NewPrediction() {
                   <span className="material-symbols-outlined text-2xl">cloud_upload</span>
                 </div>
                 <h3 className="text-sm font-bold text-slate-heading mb-1">
-                  Drop a .SAFE.zip here, or browse
+                  Drop a .SAFE.zip or GeoTIFF here, or browse
                 </h3>
                 <p className="text-xs text-slate-subtle mb-4">
-                  Sentinel-1 .SAFE.zip archive
+                  Sentinel-1 .SAFE.zip archive, or a georeferenced .tif/.tiff scene — coordinates
+                  &amp; acquisition time are read automatically from the file
                 </p>
                 <label className="cursor-pointer px-5 py-2.5 rounded-xl bg-primary hover:bg-primary-hover hover:shadow-glow text-abyss-950 text-xs font-mono font-semibold flex items-center gap-2 shadow-sm transition-all duration-300">
                   <span className="material-symbols-outlined text-base">file_open</span>
-                  Select .SAFE.zip
+                  Select file
                   <input
                     ref={inputRef}
                     accept={accept}

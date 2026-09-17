@@ -106,6 +106,8 @@ function VesselDensityHeatmap({ vessels }) {
 function MapLegend() {
   const rows = [
     { color: "#e11d48", label: "Spill Origin", shape: "circle" },
+    { color: "#0284c7", label: "Hindcast (Source Track)", shape: "line", dashed: true },
+    { color: "#f97316", label: "Forecast (Forward Drift)", shape: "line", dashed: true },
     { color: "#7f1d1d", label: "Closest Vessel (#1)", shape: "triangle" },
     { color: "#f97316", label: "2nd Closest (#2)", shape: "triangle" },
     { color: "#eab308", label: "3rd Closest (#3)", shape: "triangle" },
@@ -131,7 +133,12 @@ function MapLegend() {
                 }}
               />
             )}
-            {r.shape === "line" && <span className="inline-block w-3 h-0.5 shrink-0" style={{ background: r.color }} />}
+            {r.shape === "line" && (
+              <span
+                className="inline-block w-3.5 h-0 shrink-0 border-t-2"
+                style={{ borderColor: r.color, borderStyle: r.dashed ? "dashed" : "solid" }}
+              />
+            )}
             <span className="text-slate-300">{r.label}</span>
           </div>
         ))}
@@ -142,25 +149,20 @@ function MapLegend() {
 
 /**
  * OpenStreetMap tile map showing:
- *  - a single oil-spill mark at the detected slick centroid (no boundary
- *    polygon/circle is drawn - just the mark itself)
- *  - the estimated drift origin, and (when a candidate with a real AIS track
- *    is selected) a dotted line from that origin to the selected vessel's
- *    interpolated position at the estimated spill time
+ *  - a single oil-spill mark at the detected slick centroid
+ *  - the backward drift hindcast path & estimated origin
+ *  - the forward drift forecast path & predicted future locations
  *  - every vessel candidate drawn as a triangle mark, colored/sized by
  *    attribution probability and selection state
- *  - the selected vessel's full journey (a solid path from its earliest to
- *    its latest AIS fix), when a candidate with real position history is
- *    selected
- *
- * All coordinates are optional - the map still renders (centered on India's
- * EEZ / the given fallback) when a run has no real geolocation yet.
+ *  - the selected vessel's full journey and position at estimated spill time
  */
 export default function SpillMap({
   spillCenter,
   spillPolygon = [],
   driftOrigin,
   trajectoryPoints = [],
+  forwardTrajectoryPoints = [],
+  forwardFinalParticle = null,
   vessels = [],
   selectedVessel = null,
   fallbackCenter,
@@ -172,9 +174,7 @@ export default function SpillMap({
   const centerLat = Number.isFinite(rawCenter?.lat) ? rawCenter.lat : 15;
   const centerLon = Number.isFinite(rawCenter?.lon) ? rawCenter.lon : 75;
 
-  // Gray line from every vessel with a known position back to the spill
-  // origin (falls back to the drift-hindcast origin when no direct detection
-  // centroid is available), per the investigation map spec.
+  // Gray line from every vessel with a known position back to the spill origin
   const originForLines = spillCenter || driftOrigin || null;
   const distanceLines = useMemo(() => {
     if (!originForLines || !Number.isFinite(originForLines.lat) || !Number.isFinite(originForLines.lon)) return [];
@@ -191,6 +191,14 @@ export default function SpillMap({
     [trajectoryPoints]
   );
 
+  const forwardTrajectoryLatLngs = useMemo(
+    () =>
+      forwardTrajectoryPoints
+        .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lon))
+        .map((p) => [p.lat, p.lon]),
+    [forwardTrajectoryPoints]
+  );
+
   const boundaryPolygons = useMemo(
     () => spillPolygon
       .filter((patch) => Array.isArray(patch) && patch.length >= 3)
@@ -199,8 +207,7 @@ export default function SpillMap({
     [spillPolygon]
   );
 
-  // The selected vessel's full journey: start (earliest fix) -> end (latest
-  // fix), in chronological order, drawn as one continuous path.
+  // The selected vessel's full journey
   const journeyLatLngs = useMemo(
     () =>
       (selectedVessel?.trackPoints || [])
@@ -209,8 +216,7 @@ export default function SpillMap({
     [selectedVessel]
   );
 
-  // Dotted line: spill origin -> selected vessel's position at the time of
-  // the spill (interpolated from its track, not just its latest fix).
+  // Dotted line: spill origin -> selected vessel's position at spill time
   const spillTimeLine = useMemo(() => {
     const pos = selectedVessel?.positionAtSpillTime;
     if (
@@ -231,13 +237,16 @@ export default function SpillMap({
       pts.push([spillCenter.lat, spillCenter.lon]);
     if (driftOrigin && Number.isFinite(driftOrigin.lat) && Number.isFinite(driftOrigin.lon))
       pts.push([driftOrigin.lat, driftOrigin.lon]);
+    if (forwardFinalParticle && Number.isFinite(forwardFinalParticle.lat) && Number.isFinite(forwardFinalParticle.lon))
+      pts.push([forwardFinalParticle.lat, forwardFinalParticle.lon]);
     for (const v of vessels) if (Number.isFinite(v.lat) && Number.isFinite(v.lon)) pts.push([v.lat, v.lon]);
     for (const p of trajectoryLatLngs) pts.push(p);
+    for (const p of forwardTrajectoryLatLngs) pts.push(p);
     for (const patch of boundaryPolygons) for (const p of patch) pts.push(p);
     for (const p of journeyLatLngs) pts.push(p);
     if (spillTimeLine) pts.push(spillTimeLine[1]);
     return pts;
-  }, [spillCenter, driftOrigin, vessels, trajectoryLatLngs, boundaryPolygons, journeyLatLngs, spillTimeLine]);
+  }, [spillCenter, driftOrigin, forwardFinalParticle, vessels, trajectoryLatLngs, forwardTrajectoryLatLngs, boundaryPolygons, journeyLatLngs, spillTimeLine]);
 
   return (
     <MapContainer
@@ -330,10 +339,72 @@ export default function SpillMap({
         </>
       )}
 
+      {/* Backward Hindcast Drift Path (Blue dashed line) */}
       {trajectoryLatLngs.length > 1 && (
-        <Polyline positions={trajectoryLatLngs} pathOptions={{ color: "#0284c7", weight: 3, dashArray: "6,6", opacity: 0.8 }} />
+        <Polyline positions={trajectoryLatLngs} pathOptions={{ color: "#0284c7", weight: 3, dashArray: "6,6", opacity: 0.85 }} />
       )}
 
+      {/* Forward Forecast Drift Path (Amber/Orange dashed line) */}
+      {forwardTrajectoryLatLngs.length > 1 && (
+        <Polyline
+          positions={forwardTrajectoryLatLngs}
+          pathOptions={{ color: "#f97316", weight: 3.5, dashArray: "8,6", opacity: 0.95 }}
+        />
+      )}
+
+      {/* Forward forecast waypoints */}
+      {forwardTrajectoryPoints
+        .filter((p) => p.hoursAfterDetection && p.hoursAfterDetection > 0 && [6, 12, 18, 24, 48].includes(Math.round(p.hoursAfterDetection)))
+        .map((p, idx) => (
+          <CircleMarker
+            key={`fwd-pt-${idx}`}
+            center={[p.lat, p.lon]}
+            radius={4.5}
+            pathOptions={{
+              fillColor: "#fb923c",
+              fillOpacity: 1,
+              color: "#ffffff",
+              weight: 1.5,
+            }}
+          >
+            <Popup>
+              <div className="text-xs font-semibold text-orange-600">Forecast +{Math.round(p.hoursAfterDetection)}h</div>
+              <div className="text-[11px] font-mono text-slate-600">{p.time}</div>
+              {p.distanceFromDetectionKm != null && (
+                <div className="text-[11px] text-slate-600">Distance: {p.distanceFromDetectionKm.toFixed(1)} km</div>
+              )}
+              {p.currentSpeedMs != null && (
+                <div className="text-[10px] text-slate-500">Current: {p.currentSpeedMs.toFixed(2)} m/s ({p.currentDirectionDeg}°)</div>
+              )}
+            </Popup>
+          </CircleMarker>
+        ))}
+
+      {/* Forward final predicted location */}
+      {forwardFinalParticle && Number.isFinite(forwardFinalParticle.lat) && Number.isFinite(forwardFinalParticle.lon) && (
+        <>
+          <CircleMarker
+            center={[forwardFinalParticle.lat, forwardFinalParticle.lon]}
+            radius={16}
+            pathOptions={{ fillColor: "#f97316", fillOpacity: 0.18, stroke: false }}
+            interactive={false}
+          />
+          <CircleMarker
+            center={[forwardFinalParticle.lat, forwardFinalParticle.lon]}
+            radius={6.5}
+            pathOptions={{ fillColor: "#ea580c", fillOpacity: 1, color: "#ffffff", weight: 1.5 }}
+          >
+            <Popup>
+              <div className="text-xs font-bold text-orange-600">Predicted Slick Location (Forecast Horizon)</div>
+              <div className="text-[11px] font-mono text-slate-600">
+                {forwardFinalParticle.lat.toFixed(4)}°, {forwardFinalParticle.lon.toFixed(4)}°
+              </div>
+            </Popup>
+          </CircleMarker>
+        </>
+      )}
+
+      {/* Backward Estimated Release Origin */}
       {driftOrigin && Number.isFinite(driftOrigin.lat) && Number.isFinite(driftOrigin.lon) && (
         <CircleMarker
           center={[driftOrigin.lat, driftOrigin.lon]}
@@ -341,7 +412,7 @@ export default function SpillMap({
           pathOptions={{ fillColor: "#f59e0b", fillOpacity: 1, stroke: false }}
         >
           <Popup>
-            <div className="text-xs font-semibold">Estimated Release Origin</div>
+            <div className="text-xs font-semibold">Estimated Release Origin (Hindcast)</div>
             <div className="text-[11px] font-mono text-slate-500">
               {driftOrigin.lat.toFixed(4)}°, {driftOrigin.lon.toFixed(4)}°
             </div>
@@ -349,8 +420,7 @@ export default function SpillMap({
         </CircleMarker>
       )}
 
-      {/* Large red warning marker at the spill origin - a soft pulse ring
-          behind a solid core so it reads clearly against vessel clutter. */}
+      {/* Red warning marker at detection center */}
       {spillCenter && Number.isFinite(spillCenter.lat) && Number.isFinite(spillCenter.lon) && (
         <>
           <CircleMarker
@@ -365,7 +435,7 @@ export default function SpillMap({
             pathOptions={{ fillColor: "#e11d48", fillOpacity: 1, stroke: false }}
           >
             <Popup>
-              <div className="text-xs font-semibold">⚠ Oil Spill Detected</div>
+              <div className="text-xs font-semibold">⚠ Oil Spill Detected (T=0)</div>
               <div className="text-[11px] font-mono text-slate-500">
                 {spillCenter.lat.toFixed(4)}°, {spillCenter.lon.toFixed(4)}°
               </div>
@@ -374,8 +444,7 @@ export default function SpillMap({
         </>
       )}
 
-      {/* Every vessel candidate, shown as a triangle mark colored by
-          Haversine proximity rank (falls back to attribution probability). */}
+      {/* Every vessel candidate */}
       {vessels
         .filter((v) => v.lat != null && v.lon != null)
         .map((v) => {
