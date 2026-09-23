@@ -1,28 +1,14 @@
 """
 pipeline.py - Stage-emitting version of the Oil Spill ML inference pipeline.
 
-This module contains the SAME processing logic as the original app.py CLI
-(process_single_input), but instead of printing to a terminal and prompting
-with input(), it:
-
-  1. Takes all inputs as plain function arguments (no interactive prompts).
-  2. Reports progress through an `on_stage(name, status, message, data)`
+This module reports progress through an `on_stage(name, status, message, data)`
      callback so a web frontend can show live processing steps.
-  3. Returns one fully JSON-serializable dict with every piece of output
+  2. Returns one fully JSON-serializable dict with every piece of output
      (detection, geometry, environment, drift, vessel attribution, and
      paths to generated files).
 
-It does not change any of the existing detection / geolocation / drift /
-attribution logic - it only reuses the functions from model.py,
-preprocessing.py, safe_processor.py, environment.py, drift.py and
-ais_attribution.py exactly as app.py did.
-
-.tif/.tiff uploads: unlike a plain non-georeferenced image (.png/.jpg/.bmp),
-a GeoTIFF frequently carries its own embedded coordinate reference system
-and acquisition timestamp. tif_processor.py reads that directly from the
-file so latitude/longitude/timestamp no longer have to be typed in by hand
-for those uploads - manual values are only required as a fallback when a
-.tif/.tiff has no usable embedded georeferencing.
+The service accepts Sentinel-1 SAFE archives only. Their product metadata
+supplies the scene geolocation and acquisition timestamp.
 """
 
 from __future__ import annotations
@@ -37,23 +23,13 @@ from typing import Any, Callable, Dict, Optional
 import torch
 
 from model import predict, interpret_output
-from preprocessing import (
-    load_and_validate_image,
-    preprocess_image,
-    generate_mask_and_overlay,
-    SAR_RESIZE_INTERPOLATION,
-    DEFAULT_RESIZE_INTERPOLATION,
-)
+from preprocessing import preprocess_image, generate_mask_and_overlay, SAR_RESIZE_INTERPOLATION
 from safe_processor import (
     is_safe_input,
     process_safe_archive,
     extract_spill_centroid_geo,
     extract_spill_polygon_points_geo,
     compute_spill_geometry,
-)
-from tif_processor import (
-    is_tif_input,
-    extract_tif_geo_metadata,
 )
 from environment import fetch_environmental_history, fetch_environmental_forecast
 from drift import (
@@ -148,9 +124,6 @@ def run_pipeline(
     device: torch.device,
     outputs_dir: str,
     *,
-    latitude: Optional[float] = None,
-    longitude: Optional[float] = None,
-    timestamp: Optional[str] = None,
     lookback_days: float = 5.0,
     release_hours_ago: Optional[float] = None,
     forecast_hours: int = 24,
@@ -183,53 +156,17 @@ def run_pipeline(
 
     result: Dict[str, Any] = {
         "job_id": job_id,
-        "input_type": "Sentinel-1 SAFE" if is_safe else "Satellite Image",
+        "input_type": "Sentinel-1 SAFE",
     }
 
     # ---------------------------------------------------------------- #
     # Stage 1: extraction / load
     # ---------------------------------------------------------------- #
     on_stage("extraction", "running", "Reading input file...")
-    tif_geo_metadata: Optional[Dict[str, Any]] = None
     try:
-        if is_safe:
-            rgb_image, original_shape, safe_metadata = process_safe_archive(clean_path)
-        else:
-            rgb_image, original_shape = load_and_validate_image(clean_path)
-            safe_metadata = None
-
-            # .tif/.tiff uploads frequently carry their own embedded
-            # georeferencing (and sometimes an acquisition timestamp) -
-            # read it straight from the file instead of always demanding it
-            # from the caller, the way a plain non-georeferenced image
-            # (.png/.jpg/.bmp) still needs. Only fields the caller didn't
-            # already supply are filled in - an explicit lat/lon/timestamp
-            # always wins over what was auto-extracted.
-            if is_tif_input(clean_path):
-                try:
-                    tif_geo_metadata = extract_tif_geo_metadata(clean_path)
-                except Exception as tif_err:
-                    tif_geo_metadata = None
-                    logger.warning(f"[pipeline] GeoTIFF metadata extraction failed: {tif_err}")
-
-                if tif_geo_metadata:
-                    if latitude is None and tif_geo_metadata.get("latitude") is not None:
-                        latitude = tif_geo_metadata["latitude"]
-                    if longitude is None and tif_geo_metadata.get("longitude") is not None:
-                        longitude = tif_geo_metadata["longitude"]
-                    if not timestamp and tif_geo_metadata.get("timestamp") is not None:
-                        timestamp = tif_geo_metadata["timestamp"].strftime("%Y-%m-%dT%H:%M:%SZ")
-
-            if latitude is None or longitude is None:
-                raise PipelineInputError(
-                    "latitude and longitude are required for this file (only .SAFE/.SAFE.zip "
-                    "archives and georeferenced .tif/.tiff files carry their own geolocation; "
-                    "this file didn't have usable embedded coordinates, so provide them manually)."
-                )
-            if not (-90.0 <= float(latitude) <= 90.0):
-                raise PipelineInputError("latitude must be between -90 and 90.")
-            if not (-180.0 <= float(longitude) <= 180.0):
-                raise PipelineInputError("longitude must be between -180 and 180.")
+        if not is_safe:
+            raise PipelineInputError("Only Sentinel-1 .SAFE.zip archives are supported.")
+        rgb_image, original_shape, safe_metadata = process_safe_archive(clean_path)
     except PipelineInputError:
         on_stage("extraction", "error", "Invalid input.")
         raise
@@ -239,25 +176,11 @@ def run_pipeline(
     on_stage("extraction", "success", "Input read successfully.", {
         "input_type": result["input_type"],
         "original_shape": {"height": int(original_shape[0]), "width": int(original_shape[1])},
-        **(
-            {"geo_extracted_from_file": True}
-            if tif_geo_metadata and tif_geo_metadata.get("latitude") is not None
-            else {}
-        ),
     })
     if safe_metadata:
         result["safe_metadata"] = {
             k: v for k, v in safe_metadata.items()
             if isinstance(v, (str, int, float, bool)) or v is None
-        }
-    if tif_geo_metadata:
-        result["tif_metadata"] = {
-            "has_geotransform": tif_geo_metadata.get("has_geotransform", False),
-            "crs": tif_geo_metadata.get("crs"),
-            "bounds_wgs84": tif_geo_metadata.get("bounds_wgs84"),
-            "note": tif_geo_metadata.get("note"),
-            "geolocation_auto_extracted": tif_geo_metadata.get("latitude") is not None,
-            "timestamp_auto_extracted": tif_geo_metadata.get("timestamp") is not None,
         }
 
     # ---------------------------------------------------------------- #
@@ -386,13 +309,6 @@ def run_pipeline(
                     seed = ensure_ocean_seed(spill_lat, spill_lon)
                 except Exception:
                     seed = None
-        else:
-            spill_lat, spill_lon = float(latitude), float(longitude)
-            detection_dt = parse_timestamp_safe(timestamp)
-            try:
-                seed = ensure_ocean_seed(spill_lat, spill_lon)
-            except Exception:
-                seed = None
 
         geolocation_note = None
         if seed is not None and seed.get("was_on_land"):
@@ -419,15 +335,6 @@ def run_pipeline(
                 "be in open water."
             )
 
-        # Make it visible on the results page whenever the coordinates
-        # and/or timestamp above came from the file's own embedded metadata
-        # rather than a manual entry.
-        if tif_geo_metadata and tif_geo_metadata.get("latitude") is not None:
-            extra_note = (
-                "Coordinates and/or acquisition time were auto-extracted from this file's "
-                "embedded GeoTIFF metadata rather than entered manually."
-            )
-            geolocation_note = f"{geolocation_note} {extra_note}" if geolocation_note else extra_note
     except Exception as e:
         on_stage("geolocation", "error", f"Geolocation failed: {e}")
         raise

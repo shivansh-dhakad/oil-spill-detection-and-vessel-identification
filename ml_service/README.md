@@ -1,179 +1,100 @@
-# Oil Spill Detection & Attribution ML Service
+# VarunaDrishti ML Service
 
-A Flask microservice that takes a satellite image or Sentinel-1 `.SAFE.zip` SAR
-archive and returns:
+This Flask service runs the analysis engine behind VarunaDrishti. It accepts a SAR scene, creates an in-memory background job, reports nine stages through polling or Server-Sent Events, and writes analysis artifacts to a per-job output directory.
 
-1. **Oil spill detection** — semantic segmentation (SegFormer-B2 / legacy UNet++)
-2. **Geolocation** — pixel mask → real-world lat/lon, using SAFE product geocoding
-3. **Backward drift hindcast** — where the oil most likely came from, using
-   OpenDrift particle backtracking against ocean current + wind history
-4. **Vessel attribution** — ranks candidate vessels (AIS/GFW data) by how
-   plausible they are as the source, using spatial/temporal/behavioral scoring
-   and an Isolation Forest anomaly model
+## Pipeline
 
-It's designed to run as an internal microservice behind a Node/Express or
-similar backend, which proxies requests to it and relays JSON to a frontend.
+1. Extract Sentinel-1 SAFE or image input.
+2. Preprocess SAR/image data for the selected segmentation model.
+3. Run model inference with test-time augmentation.
+4. Create mask and overlay artifacts.
+5. Resolve spill geolocation and geometry.
+6. Retrieve environmental history.
+7. Hindcast likely backward drift and release origin.
+8. Forecast forward drift (24 hours by default).
+9. Attribute vessel candidates from configured AIS/GFW sources.
 
-See **[ARCHITECTURE.md](./ARCHITECTURE.md)** for the full pipeline design and
-data flow.
+The service can return warnings or skipped stages. For example, it does not run drift or attribution after a negative detection, and it does not invent AIS candidates when a data source is unavailable.
 
----
+## Supported input
 
-## Features
-
-- Accepts plain images (`.png/.jpg/.tif/.bmp`) **or** Sentinel-1 `.SAFE.zip`
-  archives (SAFE archives carry their own geolocation — no manual lat/lon needed)
-- Two-model support: SegFormer-B2 `.safetensors` (preferred) or a legacy
-  UNet++ `.pth` checkpoint, auto-detected from the checkpoint file
-- SAR-specific preprocessing: dual-pol (VV/VH) calibration to sigma0 dB,
-  pseudo-RGB conversion, exact training-time resize/normalization
-- Ocean current and wind data retrieval from Open-Meteo with local CSV in-situ fallback:
-  **Open-Meteo (2022+) → Copernicus In-Situ Marine CSV (`INSITU_GLO_PHY_UV_DISCRETE_NRT_013_048`) → wind-only drift**
-- Coastline-aware drift simulation (OpenDrift + GSHHS landmask) so origins
-  never land on dry ground
-- Vessel attribution against Global Fishing Watch and/or AISStream, with a
-  trained Isolation Forest scoring anomalous vessel behavior
-- Async job model: upload returns immediately with a `job_id`; progress is
-  polled or streamed live via Server-Sent Events
-
----
-
-## Project Structure
-
-```
-.
-├── server.py                  Flask API — routes, uploads, model load at startup
-├── jobs.py                    In-memory async job manager (background thread per upload)
-├── pipeline.py                Stage-emitting orchestrator — the actual pipeline logic
-├── model.py                   Model loading (SegFormer / UNet++) + inference
-├── preprocessing.py           Image validation, resize/normalize, mask/overlay generation
-├── safe_processor.py          Sentinel-1 .SAFE.zip parsing, SAR calibration, geolocation
-├── environment.py             Open-Meteo ocean current + wind history client
-├── insitu_currents.py         Copernicus in-situ CSV current parser (fallback for pre-2022 / missing data)
-├── drift.py                   OpenDrift backward drift simulation (Open-Meteo / In-situ CSV currents + wind)
-├── ais_attribution.py         Stage 3 orchestrator — AIS/GFW candidate collection + scoring
-├── track_based_attribution.py Trajectory-based scoring (spatial/temporal/drift/speed)
-├── vessel_risk.py             Isolation Forest anomaly scoring for candidate vessels
-├── app.py                     Interactive CLI entrypoint (same pipeline, terminal output)
-├── models/                    Model checkpoints (not committed — see below)
-├── data/                      In-situ ocean current CSV archive (Copernicus Marine INSITU_GLO_PHY_UV_DISCRETE_NRT_013_048)
-├── uploads/                   Saved user uploads (created at runtime)
-├── outputs/                   Generated masks, overlays, trajectories, attribution JSON
-└── requirements.txt
-```
-
----
+| Input | Notes |
+|---|---|
+| `.SAFE.zip` / `.zip` | Sentinel-1 SAFE archive; metadata supplies location. |
 
 ## Setup
 
-### Render deployment
-
-The Render service downloads the model automatically at startup. Configure:
-
-```env
-HF_MODEL_REPO_ID=shivanshdhakad/oil_spill_detection_using_unet_architecture
-HF_MODEL_FILENAME=unetpp_best.pth
-HF_MODEL_REPO_TYPE=model
-# Optional for private repositories:
-HF_TOKEN=your-huggingface-token
-```
-
-The model is downloaded into the Hugging Face cache and reused while the
-instance remains available. Do not set `HF_MODEL_REPO_TYPE=space`; the model
-is stored in a Hugging Face model repository.
-
-### 1. Install dependencies
-
-```bash
+```powershell
+cd ml_service
+Copy-Item .env.example .env
 pip install -r requirements.txt
-```
-
-> `opendrift`, `rasterio`, and `segmentation-models-pytorch`
-> are heavier/optional-ish dependencies — drift simulation and SAFE archive
-> support degrade gracefully (with a clear error) if they're missing, but
-> install them for full functionality.
-
-### 2. Get a model checkpoint
-
-Place one of these under `models/` (checked in this order):
-
-| Path                              | Format             |
-|------------------------------------|--------------------|
-| `models/unetpp_best.pth`           | Legacy UNet++      |
-| `models/best.pth`                  | Legacy UNet++      |
-| `models/model.safetensors`         | SegFormer-B2 (preferred) |
-| `models/final_statedict.pth`       | Legacy UNet++      |
-
-Or point directly at one with the `OIL_SPILL_MODEL_PATH` env var.
-
-### 3. Configure environment variables
-
-Create a `.env` file next to `server.py`:
-
-```bash
-# --- Model ---
-OIL_SPILL_MODEL_PATH=models/model.safetensors   # optional override
-
-# --- Server ---
-PORT=5001
-MAX_UPLOAD_MB=3072          # SAFE archives can be 700MB-1.5GB+
-
-# --- Vessel attribution (optional — attribution runs in PRESENCE_ONLY/UNAVAILABLE
-#     mode without these, but real AIS data needs at least one) ---
-GFW_API_TOKEN=your_global_fishing_watch_token
-AISSTREAM_API_KEY=your_aisstream_key
-```
-
-### 4. Run it
-
-```bash
-# Development
 python server.py
-
-# Production
-gunicorn -w 1 -b 0.0.0.0:5001 --timeout 300 server:app
 ```
 
-> Use a **single worker** (`-w 1`) unless you make model loading per-worker-safe
-> and have the GPU/RAM budget for it — the model is loaded once per process at
-> startup.
+The default port is `5001`. The service chooses CUDA when PyTorch detects it, otherwise CPU.
 
----
+### Model checkpoint
 
-## API Reference
+`server.py` prioritizes `models/best_model.safetensors`, then scans the local model directories for `.safetensors`, `.safetensor`, or `.pth` files. Set `OIL_SPILL_MODEL_PATH` to override that selection.
+
+If the checkpoint cannot load, the health endpoint reports `degraded`; the server remains available but new analysis requests return `503` until a compatible model is installed.
+
+### Environment
+
+Start from `.env.example`. Key settings are:
+
+| Variable | Meaning |
+|---|---|
+| `PORT` | Flask listen port (default `5001`). |
+| `OIL_SPILL_MODEL_PATH` | Optional absolute or working-directory-relative model path. |
+| `MAX_UPLOAD_MB` | Maximum request size; keep it aligned with the Express backend. |
+| `GFW_API_TOKEN` | Optional Global Fishing Watch credentials. |
+| `AISSTREAM_API_KEY` | Optional AISStream credentials. |
+| `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` | Optional remote in-situ current source. |
+
+## API
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `GET`  | `/api/health` | Model/device status |
-| `POST` | `/api/spill/analyze` | Upload a file, kicks off a job, returns `job_id` |
-| `GET`  | `/api/spill/jobs/<job_id>` | Full job status, stages, and result once complete |
-| `GET`  | `/api/spill/jobs/<job_id>/stream` | Server-Sent Events live progress stream |
-| `GET`  | `/api/spill/files/<job_id>/<name>` | Serves generated files (mask, overlay, trajectory CSV/PNG) |
+| `GET` | `/api/health` | Model status and selected device. |
+| `POST` | `/api/spill/analyze` | Start an asynchronous analysis job. |
+| `GET` | `/api/spill/jobs/<job_id>` | Job state, ordered stages, and result when complete. |
+| `GET` | `/api/spill/jobs/<job_id>/stream` | Server-Sent Events stage stream. |
+| `POST` | `/api/spill/jobs/<job_id>/cancel` | Mark an active job cancelled. |
+| `GET` | `/api/spill/files/<job_id>/<filename>` | Return an output owned by that job. |
 
-### `POST /api/spill/analyze` — multipart/form-data
+### Start an analysis
 
-| Field | Required | Notes |
+Send `multipart/form-data` to `POST /api/spill/analyze`.
+
+| Field | Required | Description |
 |---|---|---|
-| `file` | yes | `.zip`/`.png`/`.jpg`/`.tif`/`.bmp` |
-| `latitude`, `longitude` | plain images only | SAFE archives self-geolocate |
-| `timestamp` | plain images only | ISO 8601 UTC; defaults to now |
-| `lookback_days` | no | Currents/wind history window (default 20) |
-| `release_hours_ago` | no | If you already know the release age |
-| `skip_ais` | no | Skip Stage 3 vessel attribution |
+| `file` | Yes | A supported SAR archive or image. |
+| `lookback_days` | No | Hindcast history window; default is `5`. |
+| `forecast_hours` | No | Forward projection period; default is `24`. |
+| `release_hours_ago` | No | Evidence-based release age, when known. |
+| `skip_ais` | No | Boolean to skip vessel attribution. |
 
-Returns `202 Accepted` with:
+Successful submission returns `202 Accepted`:
+
 ```json
-{ "job_id": "...", "status_url": "...", "stream_url": "..." }
+{
+  "job_id": "a1b2c3d4e5f6a7b8",
+  "status_url": "/api/spill/jobs/a1b2c3d4e5f6a7b8",
+  "stream_url": "/api/spill/jobs/a1b2c3d4e5f6a7b8/stream"
+}
 ```
 
-Poll `status_url` (or subscribe to `stream_url`) until `status` is
-`complete` or `failed`.
+Terminal job states are `complete`, `failed`, and `cancelled`. Stage values are `pending`, `running`, `success`, `warning`, `error`, or `skipped`.
 
----
+## Runtime data
 
-## Known Limitations
+- `uploads/` holds Flask-side input copies until the job finishes.
+- `outputs/<job-id>/` holds generated masks, overlays, trajectory files, and maps.
+- Job state is in memory. It is not shared across processes or retained after a restart.
 
-- Open-Meteo's ocean-current model (SMOC) has coverage from Jan 2022 onward.
-- Vessel attribution quality depends entirely on AIS data availability in the
-  search window — vessels with AIS off (deliberately or not) won't appear.
-- Single-worker deployment recommended; see gunicorn note above.
+For the supported local workflow, run `python server.py` and access this service via the Node backend rather than directly from the browser.
+
+## Further implementation detail
+
+The current component-level design is documented in [Architecture.md](Architecture.md). The repository-level setup and browser-facing API are in the [root README](../README.md).

@@ -1,7 +1,7 @@
 """preprocessing.py - SAR Image validation, preprocessing, and mask/overlay generation.
 
 Pipeline specifications:
-  - Input: 2-band Sentinel-1 SAR GeoTIFF (VV, VH)
+  - Input: dual-polarization Sentinel-1 SAR bands (VV, VH) extracted from SAFE archives
   - Raw float32 read (duplicated to 2-channel if single-band)
   - dB clipping: DB_MIN = -35.0, DB_MAX = 5.0
   - Scaling to uint8: (clipped - DB_MIN) / (DB_MAX - DB_MIN) * 255
@@ -14,24 +14,10 @@ Pipeline specifications:
 from __future__ import annotations
 
 import os
-from pathlib import Path
-from typing import Tuple, Optional, Union
+from typing import Tuple, Union
 import numpy as np
 import cv2
 import torch
-from PIL import Image
-
-try:
-    import tifffile
-    HAS_TIFFFILE = True
-except ImportError:
-    HAS_TIFFFILE = False
-
-try:
-    import rasterio
-    HAS_RASTERIO = True
-except ImportError:
-    HAS_RASTERIO = False
 
 # SAR Preprocessing Parameters matching training
 SAR_DB_MIN = -35.0
@@ -41,9 +27,6 @@ PIXEL_SIZE_M = 10.0  # Sentinel-1 GRD ground sampling distance in meters
 
 DEFAULT_RESIZE_INTERPOLATION = cv2.INTER_AREA
 SAR_RESIZE_INTERPOLATION = cv2.INTER_AREA
-
-SUPPORTED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
-
 
 def clip_and_scale_sar_bands(
     sar_raw: np.ndarray,
@@ -75,109 +58,6 @@ def sar_bands_to_pseudo_rgb(
     band1_u8 = clip_and_scale_sar_bands(band1_db, db_min, db_max)
     mix_u8 = ((band0_u8.astype(np.float32) + band1_u8.astype(np.float32)) / 2.0).astype(np.uint8)
     return np.stack([band0_u8, band1_u8, mix_u8], axis=-1)
-
-
-def read_sar_geotiff(file_path: str) -> Tuple[np.ndarray, np.ndarray, Tuple[int, int]]:
-    """Reads a Sentinel-1 SAR GeoTIFF using tifffile (or rasterio/OpenCV fallback).
-
-    Returns:
-      sar_2band_uint8 (HxWx2 uint8 array)
-      rgb_image (HxWx3 uint8 array for overlays/preview)
-      original_shape (height, width)
-    """
-    path = Path(file_path)
-    raw_data: Optional[np.ndarray] = None
-
-    if HAS_TIFFFILE:
-        try:
-            raw_data = tifffile.imread(str(path))
-        except Exception:
-            raw_data = None
-
-    if raw_data is None and HAS_RASTERIO:
-        try:
-            with rasterio.open(str(path)) as src:
-                raw_data = src.read()  # (C, H, W)
-                if raw_data.ndim == 3 and raw_data.shape[0] in (1, 2, 3, 4):
-                    raw_data = np.transpose(raw_data, (1, 2, 0))  # (H, W, C)
-        except Exception:
-            raw_data = None
-
-    if raw_data is None:
-        raw_data = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
-
-    if raw_data is None:
-        raise ValueError(f"Failed to read SAR GeoTIFF from {file_path}")
-
-    raw_float = raw_data.astype(np.float32)
-
-    # Normalize channel layout to (H, W, 2)
-    if raw_float.ndim == 2:
-        # Single band: duplicate into 2 channels [band, band]
-        sar_2band_float = np.stack([raw_float, raw_float], axis=-1)
-    elif raw_float.ndim == 3:
-        if raw_float.shape[0] in (1, 2) and raw_float.shape[2] not in (1, 2):
-            raw_float = np.transpose(raw_float, (1, 2, 0))
-
-        if raw_float.shape[-1] == 1:
-            sar_2band_float = np.stack([raw_float[..., 0], raw_float[..., 0]], axis=-1)
-        elif raw_float.shape[-1] >= 2:
-            sar_2band_float = raw_float[..., :2]
-        else:
-            sar_2band_float = np.stack([raw_float[..., 0], raw_float[..., 0]], axis=-1)
-    else:
-        raise ValueError(f"Unexpected SAR raster shape: {raw_data.shape}")
-
-    # Clip to dB range [-35.0, 5.0] and scale to uint8 per band
-    # If the raw data is already in [0, 255] integer range, treat directly
-    if np.nanmin(sar_2band_float) < 0.0 or np.nanmax(sar_2band_float) <= 30.0:
-        sar_2band_u8 = clip_and_scale_sar_bands(sar_2band_float, SAR_DB_MIN, SAR_DB_MAX)
-    else:
-        sar_2band_u8 = np.clip(sar_2band_float, 0, 255).astype(np.uint8)
-
-    orig_h, orig_w = sar_2band_u8.shape[:2]
-
-    # Create 3-channel RGB representation for display and visual overlays
-    b0 = sar_2band_u8[..., 0]
-    b1 = sar_2band_u8[..., 1]
-    mix = ((b0.astype(np.float32) + b1.astype(np.float32)) / 2.0).astype(np.uint8)
-    rgb_image = np.stack([b0, b1, mix], axis=-1)
-
-    return sar_2band_u8, rgb_image, (orig_h, orig_w)
-
-
-def load_and_validate_image(image_path: str) -> Tuple[np.ndarray, Tuple[int, int]]:
-    """Loads an image file, validates format, and produces an RGB array.
-
-    For .tif/.tiff GeoTIFFs, uses read_sar_geotiff.
-    """
-    path = Path(image_path)
-    if not path.exists():
-        raise FileNotFoundError(f"Image file not found: {image_path}")
-
-    suffix = path.suffix.lower()
-    if suffix not in SUPPORTED_EXTENSIONS:
-        raise ValueError(
-            f"Unsupported image extension '{suffix}'. Supported: {', '.join(sorted(SUPPORTED_EXTENSIONS))}"
-        )
-
-    if suffix in (".tif", ".tiff"):
-        _, rgb_image, orig_shape = read_sar_geotiff(str(path))
-        return rgb_image, orig_shape
-
-    img_bgr = cv2.imread(str(path), cv2.IMREAD_COLOR)
-    if img_bgr is None:
-        try:
-            with Image.open(str(path)) as pil_img:
-                pil_img = pil_img.convert("RGB")
-                rgb_image = np.array(pil_img, dtype=np.uint8)
-        except Exception as e:
-            raise ValueError(f"Failed to read image '{image_path}': {e}")
-    else:
-        rgb_image = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-
-    orig_h, orig_w = rgb_image.shape[:2]
-    return rgb_image, (orig_h, orig_w)
 
 
 def preprocess_image(

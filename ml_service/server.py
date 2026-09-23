@@ -43,7 +43,7 @@ OUTPUTS_DIR = CURRENT_DIR / "outputs"
 UPLOADS_DIR.mkdir(exist_ok=True)
 OUTPUTS_DIR.mkdir(exist_ok=True)
 
-ALLOWED_EXTENSIONS = {".zip", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
+ALLOWED_EXTENSIONS = {".zip"}
 # Sentinel-1 SAFE archives commonly run 700MB-1.5GB+, so default the cap well
 MAX_CONTENT_LENGTH = int(os.environ.get("MAX_UPLOAD_MB", "3072")) * 1024 * 1024
 
@@ -125,7 +125,7 @@ try:
 except Exception as e:
     print(f"[startup] ERROR: failed to load model: {e}")
     print("[startup] The server will still start, but /api/spill/analyze will fail "
-          "until a valid local model or Hugging Face model configuration is available.")
+          "until a valid local model is available.")
     model, model_metadata = None, {"error": str(e)}
 
 job_manager = JobManager(model=model, device=device, outputs_dir=str(OUTPUTS_DIR))
@@ -147,15 +147,6 @@ def _parse_bool(value, default=False):
     return str(value).strip().lower() in ("1", "true", "yes", "on")
 
 
-def _parse_float(value):
-    if value is None or value == "":
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
 # --------------------------------------------------------------------- #
 # Routes
 # --------------------------------------------------------------------- #
@@ -173,16 +164,10 @@ def analyze():
     """
     Accepts a multipart/form-data upload:
 
-      file            (required) - a .SAFE.zip / .zip Sentinel-1 archive,
-                                    OR a plain image (.png/.jpg/.tif/.bmp)
+      file            (required) - a Sentinel-1 .SAFE.zip archive
 
-      For plain images ONLY (SAFE archives carry their own geolocation):
-      latitude        (required) - decimal degrees, -90..90
-      longitude       (required) - decimal degrees, -180..180
-      timestamp       (optional) - ISO 8601 UTC acquisition time, defaults to now
-
-      Optional for either input type:
-      lookback_days       - float, days of current/wind history to backtrack (default 20)
+      Optional:
+      lookback_days       - float, days of current/wind history to backtrack (default 5)
       release_hours_ago   - float, evidence-based release age in hours
       skip_ais            - bool, skip Stage 3 vessel attribution (default false)
 
@@ -204,12 +189,10 @@ def analyze():
                      f"Allowed: {sorted(ALLOWED_EXTENSIONS)}"
         }), 400
 
-    latitude = _parse_float(request.form.get("latitude"))
-    longitude = _parse_float(request.form.get("longitude"))
-    timestamp = request.form.get("timestamp")
-    lookback_days = _parse_float(request.form.get("lookback_days")) or 5.0
-    forecast_hours = int(_parse_float(request.form.get("forecast_hours")) or 24)
-    release_hours_ago = _parse_float(request.form.get("release_hours_ago"))
+    lookback_days = float(request.form.get("lookback_days") or 5.0)
+    forecast_hours = int(float(request.form.get("forecast_hours") or 24))
+    release_hours_ago = request.form.get("release_hours_ago")
+    release_hours_ago = float(release_hours_ago) if release_hours_ago else None
     skip_ais = _parse_bool(request.form.get("skip_ais"), default=False)
 
     # Save the upload under a unique, sanitized name.
@@ -223,9 +206,6 @@ def analyze():
         input_path=str(save_path),
         input_filename=original_name,
         params={
-            "latitude": latitude,
-            "longitude": longitude,
-            "timestamp": timestamp,
             "lookback_days": lookback_days,
             "forecast_hours": forecast_hours,
             "release_hours_ago": release_hours_ago,

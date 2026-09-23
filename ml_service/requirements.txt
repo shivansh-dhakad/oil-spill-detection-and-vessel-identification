@@ -1,7 +1,6 @@
 # Minimal required dependencies for Oil Spill ML local inference + Drift Hindcast
 flask>=3.0.0
 flask-cors>=4.0.0
-gunicorn>=21.2.0
 torch>=2.0.0
 torchvision>=0.15.0
 transformers>=4.40.0
@@ -23,5 +22,4 @@ opendrift>=1.14.0
 pyproj>=3.6.0
 xarray>=2024.1.0
 netCDF4>=1.6.0
-tifffile>=2023.1.0
 scikit-image>=0.21.0
