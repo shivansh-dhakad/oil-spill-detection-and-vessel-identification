@@ -1,18 +1,6 @@
 """
 server.py - Flask API for the Oil Spill ML pipeline.
 
-Designed to sit behind your existing Node.js/Express backend as an internal
-microservice (Node proxies requests to this service and relays JSON to the
-React frontend), or to be called directly from the frontend if you prefer.
-
-Run:
-    python server.py
-    # or in production:
-    gunicorn -w 1 -b 0.0.0.0:5001 --timeout 300 server:app
-    # -w 1 (single worker) is recommended unless you move the model load to
-    # be per-worker-safe and have the GPU/RAM to support it - the model is
-    # loaded once per process at startup.
-
 Endpoints:
     GET  /api/health
     POST /api/spill/analyze              multipart/form-data upload -> {job_id}
@@ -57,24 +45,12 @@ OUTPUTS_DIR.mkdir(exist_ok=True)
 
 ALLOWED_EXTENSIONS = {".zip", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
 # Sentinel-1 SAFE archives commonly run 700MB-1.5GB+, so default the cap well
-# above that. Override with MAX_UPLOAD_MB if your infra needs a tighter limit
-# (keep backend/routes/predictions.js's multer `limits.fileSize` >= this).
 MAX_CONTENT_LENGTH = int(os.environ.get("MAX_UPLOAD_MB", "3072")) * 1024 * 1024
 
 # Prioritize new .safetensors checkpoints (e.g. best_model.safetensors)
 DEFAULT_MODEL_CANDIDATES = [
     CURRENT_DIR / "models" / "best_model.safetensors",
     CURRENT_DIR / "models" / "best_model.safetensor",
-    CURRENT_DIR / "models" / "model.safetensors",
-    CURRENT_DIR / "models" / "model.safetensor",
-    CURRENT_DIR / "models" / "unetpp_best.safetensors",
-    CURRENT_DIR / "models" / "best.safetensors",
-    CURRENT_DIR.parent / "models" / "best_model.safetensors",
-    CURRENT_DIR.parent / "models" / "model.safetensors",
-    CURRENT_DIR / "models" / "unetpp_best.pth",
-    CURRENT_DIR.parent / "models" / "unetpp_best.pth",
-    CURRENT_DIR / "models" / "best.pth",
-    CURRENT_DIR / "models" / "final_statedict.pth",
 ]
 
 
@@ -123,7 +99,6 @@ def resolve_model_path() -> str:
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = MAX_CONTENT_LENGTH
 # Lock this down to your Node backend / frontend origin(s) in production,
-# e.g. CORS(app, origins=["https://your-frontend.example.com"])
 CORS(app)
 
 
