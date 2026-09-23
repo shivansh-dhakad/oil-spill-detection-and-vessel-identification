@@ -131,7 +131,7 @@ export function DetectionModelCard() {
     <section className="bg-card-white rounded-2xl border border-border-soft shadow-sm p-5">
       <CardHeader icon="memory" title="Detection Model" pill="UNet++" pillTone="sky" />
       <p className="text-xs text-slate-body leading-relaxed mt-3">
-        Binary UNet++ segments each SAR image pixel as oil or background to locate the slick — 85.4% val IoU / 90.9%
+        Binary UNet++ segments each SAR image pixel as oil or background to locate the slick — 87.06% val IoU / 90.9%
         Dice after 38 training epochs.
       </p>
       <div className="grid grid-cols-3 gap-2 mt-3">

@@ -1,316 +1,262 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { motion } from "framer-motion";
 import { api } from "../api.js";
+import "../dashboard.css";
+import "../history.css";
+
+const rise = {
+  hidden: { opacity: 0, y: 24 },
+  show: (i = 0) => ({ opacity: 1, y: 0, transition: { duration: 0.7, delay: i * 0.07, ease: [0.16, 1, 0.3, 1] } }),
+};
+
+const STATUS_OPTIONS = [
+  { id: "all", label: "All" },
+  { id: "detected", label: "Spill detected" },
+  { id: "clean", label: "Clean" },
+];
+
+function formatWhen(value) {
+  if (!value) return { day: "—", time: "—" };
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return { day: String(value).slice(0, 10), time: String(value).slice(11, 16) || "—" };
+  return {
+    day: d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }),
+    time: `${d.toISOString().slice(11, 16)} UTC`,
+  };
+}
+
+function StatCard({ icon, label, value, unit, foot, tone = "", i = 0 }) {
+  return (
+    <motion.div className={`lt-hstat ${tone}`} variants={rise} custom={i} initial="hidden" whileInView="show" viewport={{ once: true, amount: 0.2 }}>
+      <div className="lt-hstat-label">
+        <span>{label}</span>
+        <span className="material-symbols-outlined">{icon}</span>
+      </div>
+      <div className="lt-hstat-num">
+        {value}
+        {unit && <small>{unit}</small>}
+      </div>
+      <div className="lt-hstat-foot">{foot}</div>
+    </motion.div>
+  );
+}
 
 export default function PredictionHistory() {
   const [predictions, setPredictions] = useState([]);
   const [stats, setStats] = useState(null);
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [status, setStatus] = useState("all");
   const [minConfidence, setMinConfidence] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 250);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  useEffect(() => {
+    let cancelled = false;
     setLoading(true);
     Promise.all([
-      api.listPredictions({ search, status, minConfidence: minConfidence.replace(">", "") }),
+      api.listPredictions({ search: debouncedSearch, status, minConfidence: minConfidence.replace(">", "") }),
       api.getStats(),
     ])
       .then(([predRes, statsRes]) => {
+        if (cancelled) return;
         setPredictions(predRes.predictions);
         setStats(statsRes);
         setError(null);
       })
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, [search, status, minConfidence]);
+      .catch((e) => !cancelled && setError(e.message))
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedSearch, status, minConfidence]);
+
+  const filtersActive = debouncedSearch || status !== "all" || minConfidence;
 
   return (
-    <main className="pt-16 min-h-screen flex flex-col justify-between">
-      <div className="p-6 lg:p-8 max-w-[1680px] w-full mx-auto space-y-6">
-        {/* Page Header */}
-        <div className="flex flex-col md:flex-row md:items-end justify-between pb-2 gap-4">
-          <div>
-            <h1 className="text-2xl lg:text-3xl font-bold font-display text-slate-900 tracking-tight flex items-center gap-2.5">
-              Prediction History &amp; Maritime Audit Log
-              <span className="w-2.5 h-2.5 rounded-full bg-teal-500 ring-4 ring-teal-100"></span>
-            </h1>
-            <p className="text-sm text-slate-500 max-w-3xl mt-1">
-              Historical satellite SAR acquisitions, slick detection records, and vessel attribution reports
-            </p>
-          </div>
+    <main className="lt-page lt-history">
+      {/* ============================ HEAD ============================ */}
+      <header className="lt-hist-head">
+        <div className="lt-hist-copy">
+          <motion.span className="lt-eyebrow" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.8 }}>
+            History · Maritime audit log
+          </motion.span>
+          <h1 className="lt-hist-title lt-display">
+            Every scene,
+            <br />
+            <em>on the record.</em>
+          </h1>
+          <motion.p className="lt-hist-sub" initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3, duration: 0.8, ease: [0.16, 1, 0.3, 1] }}>
+            Past Sentinel-1 acquisitions, slick detections, and the vessels that were ranked against them.
+          </motion.p>
         </div>
 
-        {/* Summary Metrics */}
         {stats && (
-          <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-xs hover:border-cyan-500 hover:shadow-[0_0_26px_rgba(34,211,238,0.3)] transition-all duration-300">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-mono uppercase tracking-wider text-slate-500 font-semibold">
-                  TOTAL ACQUISITIONS
-                </span>
-                <div className="w-8 h-8 rounded-lg bg-sky-50 text-sky-600 flex items-center justify-center">
-                  <span className="material-symbols-outlined text-[20px]">satellite_alt</span>
-                </div>
-              </div>
-              <div className="mt-4 text-3xl font-bold font-display text-slate-900 tracking-tight">
-                {stats.totalAcquisitions}
-              </div>
-              <div className="mt-3 pt-3 border-t border-slate-100 text-xs text-slate-500">
-                Sentinel-1A &amp; 1B Dual-Pass
-              </div>
-            </div>
-
-            <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-xs hover:border-rose-500 hover:shadow-[0_0_26px_rgba(244,63,94,0.3)] transition-all duration-300">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-mono uppercase tracking-wider text-slate-500 font-semibold">
-                  CONFIRMED SLICKS
-                </span>
-                <div className="w-8 h-8 rounded-lg bg-rose-50 text-rose-600 flex items-center justify-center">
-                  <span className="material-symbols-outlined text-[20px]">warning</span>
-                </div>
-              </div>
-              <div className="mt-4 flex items-baseline justify-between">
-                <div className="text-3xl font-bold font-display text-rose-600 tracking-tight">
-                  {stats.confirmedSlicks}
-                </div>
-                <span className="px-2 py-0.5 rounded bg-rose-50 border border-rose-200 text-rose-700 text-xs font-mono font-bold">
-                  {stats.incidenceRate}% INCIDENCE
-                </span>
-              </div>
-              <div className="mt-3 pt-3 border-t border-slate-100 text-xs text-slate-500">
-                Total slick area {stats.totalSlickAreaKm2} km²
-              </div>
-            </div>
-
-            <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-xs hover:border-teal-500 hover:shadow-[0_0_26px_rgba(20,184,166,0.3)] transition-all duration-300">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-mono uppercase tracking-wider text-slate-500 font-semibold">
-                  ATTRIBUTIONS MATCHED
-                </span>
-                <div className="w-8 h-8 rounded-lg bg-teal-50 text-teal-600 flex items-center justify-center">
-                  <span className="material-symbols-outlined text-[20px]">directions_boat</span>
-                </div>
-              </div>
-              <div className="mt-4 flex items-baseline justify-between">
-                <div className="text-3xl font-bold font-display text-slate-900 tracking-tight">
-                  {stats.attributionsMatched}{" "}
-                  <span className="text-lg font-normal text-slate-400 font-body">({stats.attributionRate}%)</span>
-                </div>
-                <span className="material-symbols-outlined text-teal-600 text-[22px]">verified_user</span>
-              </div>
-              <div className="mt-3 pt-3 border-t border-slate-100 text-xs text-slate-500">
-                AIS Kinematic Correlation
-              </div>
-            </div>
-
-            <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-xs hover:border-amber-500 hover:shadow-[0_0_26px_rgba(245,158,11,0.3)] transition-all duration-300">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-mono uppercase tracking-wider text-slate-500 font-semibold">
-                  TOTAL MONITORED AREA
-                </span>
-                <div className="w-8 h-8 rounded-lg bg-sky-50 text-sky-600 flex items-center justify-center">
-                  <span className="material-symbols-outlined text-[20px]">square_foot</span>
-                </div>
-              </div>
-              <div className="mt-4 text-3xl font-bold font-display text-slate-900 tracking-tight">
-                {stats.totalMonitoredAreaKm2.toLocaleString()}{" "}
-                <span className="text-lg font-normal text-slate-400 font-body">km²</span>
-              </div>
-              <div className="mt-3 pt-3 border-t border-slate-100 text-xs text-slate-500">Global EEZ coverage</div>
-            </div>
+          <section className="lt-hstats" aria-label="Summary">
+            <StatCard i={0} icon="satellite_alt" label="Acquisitions" value={stats.totalAcquisitions} foot="Sentinel-1A & 1B scenes analysed" />
+            <StatCard
+              i={1}
+              tone="is-ink"
+              icon="warning"
+              label="Confirmed slicks"
+              value={stats.confirmedSlicks}
+              unit={`${stats.incidenceRate}%`}
+              foot={`${stats.totalSlickAreaKm2} km² of oil mapped`}
+            />
+            <StatCard
+              i={2}
+              tone="is-sea"
+              icon="directions_boat"
+              label="Attributions"
+              value={stats.attributionsMatched}
+              unit={`${stats.attributionRate}%`}
+              foot="Slicks with a vessel above 50%"
+            />
+            <StatCard
+              i={3}
+              icon="square_foot"
+              label="Area monitored"
+              value={Number(stats.totalMonitoredAreaKm2).toLocaleString()}
+              unit="km²"
+              foot="Global EEZ coverage"
+            />
           </section>
         )}
+      </header>
 
-        {/* Filter bar */}
-        <section className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs space-y-4">
-          <div className="flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-4">
-            <div className="relative flex-1">
-              <span className="absolute inset-y-0 left-3.5 flex items-center text-slate-400 pointer-events-none">
-                <span className="material-symbols-outlined text-[19px]">search</span>
-              </span>
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="w-full h-10 pl-10 pr-4 text-xs font-mono bg-slate-50 border border-slate-200 rounded-lg text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-primary focus:bg-white focus:ring-2 focus:ring-sky-100 transition-all"
-                placeholder="Search by Prediction ID, vessel name, MMSI, or region…"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="flex flex-col">
-                <label className="text-[10px] text-slate-400 font-mono font-bold uppercase mb-1">Detection Status</label>
-                <select
-                  value={status}
-                  onChange={(e) => setStatus(e.target.value)}
-                  className="h-9 bg-slate-50 border border-slate-200 rounded-lg px-3 text-xs font-medium text-slate-700 focus:outline-none focus:border-primary focus:bg-white transition-colors"
-                >
-                  <option value="all">All</option>
-                  <option value="detected">Spill Detected</option>
-                  <option value="clean">Clean / No Slick</option>
-                </select>
-              </div>
-              <div className="flex flex-col">
-                <label className="text-[10px] text-slate-400 font-mono font-bold uppercase mb-1">Min Confidence</label>
-                <select
-                  value={minConfidence}
-                  onChange={(e) => setMinConfidence(e.target.value)}
-                  className="h-9 bg-slate-50 border border-slate-200 rounded-lg px-3 text-xs font-medium text-slate-700 focus:outline-none focus:border-primary focus:bg-white transition-colors"
-                >
-                  <option value="">All</option>
-                  <option value=">90">&gt;90%</option>
-                  <option value=">75">&gt;75%</option>
-                  <option value=">50">&gt;50%</option>
-                </select>
-              </div>
-            </div>
-          </div>
-        </section>
+      <div className="lt-hist-wrap">
+        {/* ============================ FILTERS ============================ */}
+        <div className="lt-filters" role="search">
+          <label className="lt-search">
+            <span className="material-symbols-outlined">search</span>
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by run ID, vessel name, MMSI or region"
+              aria-label="Search predictions"
+            />
+          </label>
 
-        {/* Table */}
-        <section className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
-          <div className="px-6 py-3.5 border-b border-slate-200 flex items-center justify-between bg-slate-50/70 flex-wrap gap-2">
-            <div className="flex items-center space-x-3">
-              <span className="material-symbols-outlined text-primary">data_table</span>
-              <h2 className="text-sm font-bold font-display text-slate-900">Verified SAR Ingestion Records</h2>
-              <span className="px-2 py-0.5 rounded-full bg-white border border-slate-200 text-slate-500 font-mono text-[10px] font-bold">
-                {predictions.length} RECORDS
-              </span>
-            </div>
+          <div className="lt-seg" role="group" aria-label="Detection status">
+            {STATUS_OPTIONS.map((o) => (
+              <button key={o.id} type="button" className={status === o.id ? "is-on" : ""} aria-pressed={status === o.id} onClick={() => setStatus(o.id)}>
+                {o.label}
+              </button>
+            ))}
           </div>
-          <div className="overflow-x-auto custom-scrollbar">
-            <table className="w-full text-left border-collapse">
+
+          <select className="lt-select" value={minConfidence} onChange={(e) => setMinConfidence(e.target.value)} aria-label="Minimum confidence">
+            <option value="">Any confidence</option>
+            <option value=">90">Above 90%</option>
+            <option value=">75">Above 75%</option>
+            <option value=">50">Above 50%</option>
+          </select>
+        </div>
+
+        {/* ============================ LEDGER ============================ */}
+        <section className="lt-ledger">
+          <div className="lt-ledger-head">
+            <h2 className="lt-display">Verified SAR ingestion records</h2>
+            <span className="lt-count">{predictions.length} RECORDS</span>
+          </div>
+
+          <div className="lt-scroll">
+            <table className="lt-table">
               <thead>
-                <tr className="border-b border-slate-200 bg-slate-50/50 text-[11px] font-mono text-slate-500 uppercase tracking-wider">
-                  <th className="py-3.5 px-5">Run ID / Sensor</th>
-                  <th className="py-3.5 px-4">Acquisition (UTC)</th>
-                  <th className="py-3.5 px-4">Target Marine Region</th>
-                  <th className="py-3.5 px-4">Detection Result</th>
-                  <th className="py-3.5 px-4">Slick Extent</th>
-                  <th className="py-3.5 px-4">Model Conf.</th>
-                  <th className="py-3.5 px-4">Suspect Attributed</th>
-                  <th className="py-3.5 px-5 text-right">Audit Actions</th>
+                <tr>
+                  <th>Run</th>
+                  <th>Acquired</th>
+                  <th>Region</th>
+                  <th>Result</th>
+                  <th>Slick extent</th>
+                  <th>Confidence</th>
+                  <th>Top suspect</th>
+                  <th />
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 text-xs">
-                {loading && (
-                  <tr>
-                    <td colSpan={8} className="py-8 text-center text-slate-400 font-mono text-xs">
-                      Loading records…
-                    </td>
-                  </tr>
-                )}
-                {!loading && error && (
-                  <tr>
-                    <td colSpan={8} className="py-8 text-center text-rose-600 font-mono text-xs">
-                      {error}
-                    </td>
-                  </tr>
-                )}
-                {!loading &&
-                  !error &&
-                  predictions.map((p) => {
-                    const detected = p.detection === "detected";
-                    const candidates = Array.isArray(p.candidates) ? p.candidates : [];
-                    const top = candidates[0];
-                    let dateStr = "—";
-                    let timeStr = "—";
-                    try {
-                      const date = new Date(p.acquiredAt);
-                      if (!isNaN(date.getTime())) {
-                        dateStr = date.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
-                        timeStr = `${date.toISOString().slice(11, 16)} UTC`;
-                      } else if (p.acquiredAt) {
-                        dateStr = String(p.acquiredAt).slice(0, 10);
-                        timeStr = String(p.acquiredAt).slice(11, 16) || "—";
-                      }
-                    } catch {
-                      dateStr = String(p.acquiredAt || "—");
-                    }
-                    return (
-                      <tr key={p.id} className="hover:bg-slate-900/90 hover:shadow-[inset_3px_0_0_#22d3ee] transition-colors group">
-                        <td className="py-4 px-5">
-                          <div className="flex items-center space-x-2">
-                            <span
-                              className={`w-2 h-2 rounded-full ${
-                                detected ? (p.severity === "critical" ? "bg-rose-500 animate-pulse" : "bg-amber-500") : "bg-emerald-500"
-                              }`}
-                            ></span>
-                            <span className="text-primary font-mono font-bold">{p.id}</span>
+              <tbody>
+                {predictions.map((p) => {
+                  const detected = p.detection === "detected";
+                  const top = Array.isArray(p.candidates) ? p.candidates[0] : null;
+                  const when = formatWhen(p.acquiredAt);
+                  const isCoverage = p.areaIsCoveragePct ?? p.areaIsCoveragePercent;
+                  const dotClass = detected ? (p.severity === "critical" ? "is-hot" : "is-warn") : "";
+                  return (
+                    <tr key={p.id}>
+                      <td>
+                        <div className="lt-id">
+                          <span className={`lt-dot ${dotClass}`} />
+                          <b>{p.id}</b>
+                        </div>
+                        <div className="lt-id-sub">{p.sensor || "Sentinel-1"}</div>
+                      </td>
+                      <td>
+                        <div className="lt-cell-main">{when.day}</div>
+                        <div className="lt-cell-sub">{when.time}</div>
+                      </td>
+                      <td>
+                        <div className="lt-cell-main">{p.region?.name || "Unknown region"}</div>
+                        <div className="lt-cell-sub is-sea">
+                          {p.region?.lat != null ? `${p.region.lat}°N` : "—"}, {p.region?.lon != null ? `${p.region.lon}°E` : "—"}
+                        </div>
+                      </td>
+                      <td>
+                        <span className={`lt-result ${detected ? "is-hot" : "is-clean"}`}>
+                          <i />
+                          {detected ? "Detected" : "Clean"}
+                        </span>
+                      </td>
+                      {/* A clean scene has no slick, so never show a stale area for it. */}
+                      <td className="lt-area">{detected && p.slickAreaKm2 != null ? `${p.slickAreaKm2} ${isCoverage ? "%" : "km²"}` : "—"}</td>
+                      <td>
+                        <div className="lt-conf">
+                          <b>{p.confidence}%</b>
+                          <div className="lt-conf-bar">
+                            <span style={{ width: `${Math.max(0, Math.min(100, p.confidence || 0))}%` }} />
                           </div>
-                          <div className="text-[10px] font-mono text-slate-400 pl-4">{p.sensor || "Sentinel-1"}</div>
-                        </td>
-                        <td className="py-4 px-4 text-slate-700">
-                          <div className="font-medium text-slate-900 group-hover:text-slate-100">{dateStr}</div>
-                          <div className="text-[11px] font-mono text-slate-400">{timeStr}</div>
-                        </td>
-                        <td className="py-4 px-4">
-                          <div className="text-slate-900 group-hover:text-slate-100 font-semibold">{p.region?.name || "Unknown Region"}</div>
-                          <div className="text-[10px] font-mono text-teal-700 group-hover:text-teal-300">
-                            {p.region?.lat != null ? `${p.region.lat}°N` : "—"}, {p.region?.lon != null ? `${p.region.lon}°E` : "—"}
-                          </div>
-                        </td>
-                        <td className="py-4 px-4">
-                          <span
-                            className={`inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full border font-mono text-[11px] font-bold ${
-                              detected ? "bg-rose-50 border-rose-200 text-rose-700" : "bg-emerald-50 border-emerald-200 text-emerald-700"
-                            }`}
-                          >
-                            <span className={`w-1.5 h-1.5 rounded-full ${detected ? "bg-rose-600" : "bg-emerald-600"}`}></span>
-                            <span>{detected ? "Detected" : "Clean"}</span>
-                          </span>
-                        </td>
-                        {/* A clean scene has no slick - never render a (stale) nonzero area on it. */}
-                        <td className="py-4 px-4 font-mono text-slate-900 group-hover:text-white font-bold">
-                          {detected && p.slickAreaKm2 != null ? `${p.slickAreaKm2} ${p.areaIsCoveragePct ? "%" : "km²"}` : "—"}
-                        </td>
-                        <td className="py-4 px-4">
-                          <div className="flex items-center space-x-2">
-                            <span className="font-mono text-sky-800 font-bold text-xs">{p.confidence}%</span>
-                            <div className="w-14 bg-slate-100 h-1.5 rounded-full overflow-hidden">
-                              <div className="bg-primary h-full rounded-full" style={{ width: `${p.confidence}%` }} />
+                        </div>
+                      </td>
+                      <td>
+                        {top ? (
+                          <>
+                            <div className="lt-suspect">
+                              <span>{top.name}</span>
+                              {top.flag && top.flag !== "UNKNOWN" && <span className="lt-flag">{top.flag}</span>}
                             </div>
-                          </div>
-                        </td>
-                        <td className="py-4 px-4">
-                          {top ? (
-                            <>
-                              <div className="text-slate-900 group-hover:text-slate-100 font-semibold flex items-center gap-1.5 flex-wrap">
-                                <span>{top.name}</span>
-                                {top.flag && top.flag !== "UNKNOWN" && (
-                                  <span className="px-1 py-0.2 rounded bg-sky-50 border border-sky-100 text-primary font-mono text-[9px] font-bold">
-                                    {top.flag}
-                                  </span>
-                                )}
-                              </div>
-                              <div className="text-[10px] font-mono text-amber-700 font-medium mt-0.5">
-                                {top.probability}% PROB // MMSI {top.mmsi} {top.vesselType ? `• ${top.vesselType}` : ""}
-                              </div>
-                            </>
-                          ) : (
-                            <span className="text-slate-400 text-[11px] font-mono">— none —</span>
-                          )}
-                        </td>
-                        <td className="py-4 px-5 text-right">
-                          <Link
-                            to={`/results/${p.id}`}
-                            className="px-3 py-1.5 rounded-lg bg-primary hover:bg-sky-700 text-white font-semibold text-xs transition-all shadow-xs active:scale-95 inline-block"
-                          >
-                            View Analysis
-                          </Link>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                {!loading && !error && predictions.length === 0 && (
-                  <tr>
-                    <td colSpan={8} className="py-8 text-center text-slate-400 font-mono text-xs">
-                      No records match the current filters.
-                    </td>
-                  </tr>
-                )}
+                            <div className="lt-cell-sub">
+                              {top.probability}% · MMSI {top.mmsi}
+                              {top.vesselType ? ` · ${top.vesselType}` : ""}
+                            </div>
+                          </>
+                        ) : (
+                          <span className="lt-none">No vessel ranked</span>
+                        )}
+                      </td>
+                      <td>
+                        <Link to={`/results/${p.id}`} className="lt-btn lt-btn-ink lt-btn-sm">
+                          View analysis
+                        </Link>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
+
+            {loading && <div className="lt-state">Loading records…</div>}
+            {!loading && error && <div className="lt-state is-error">{error}</div>}
+            {!loading && !error && predictions.length === 0 && (
+              <div className="lt-state">
+                <h3 className="lt-display">{filtersActive ? "No records match" : "Nothing on record yet"}</h3>
+                <p>{filtersActive ? "Loosen the search or filters to see more scenes." : "Upload a Sentinel-1 scene and it will appear here once the analysis finishes."}</p>
+              </div>
+            )}
           </div>
         </section>
       </div>

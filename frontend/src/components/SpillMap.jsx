@@ -102,7 +102,8 @@ function VesselDensityHeatmap({ vessels }) {
   );
 }
 
-// Static legend box matching the investigation map's color key.
+// Static legend box matching the investigation map's color key
+// (styled by .lr-legend in results.css - survey-chart light theme).
 function MapLegend() {
   const rows = [
     { color: "#e11d48", label: "Spill Origin", shape: "circle" },
@@ -115,34 +116,28 @@ function MapLegend() {
     { color: "#9ca3af", label: "Distance to Origin", shape: "line" },
   ];
   return (
-    <div className="absolute top-60 left-5 z-[500] bg-slate-950/85 backdrop-blur-md border border-cyan-400/20 rounded-xl shadow-glow-lg px-3 py-2.5 text-[11px] font-mono">
-      <div className="font-bold text-slate-200 mb-1.5 text-[10px] uppercase tracking-wide">Map Legend</div>
-      <div className="space-y-1">
-        {rows.map((r) => (
-          <div key={r.label} className="flex items-center gap-2">
-            {r.shape === "circle" && (
-              <span className="inline-block w-2.5 h-2.5 rounded-full shrink-0" style={{ background: r.color }} />
-            )}
-            {r.shape === "triangle" && (
-              <span
-                className="inline-block w-0 h-0 shrink-0"
-                style={{
-                  borderLeft: "5px solid transparent",
-                  borderRight: "5px solid transparent",
-                  borderBottom: `9px solid ${r.color}`,
-                }}
-              />
-            )}
-            {r.shape === "line" && (
-              <span
-                className="inline-block w-3.5 h-0 shrink-0 border-t-2"
-                style={{ borderColor: r.color, borderStyle: r.dashed ? "dashed" : "solid" }}
-              />
-            )}
-            <span className="text-slate-300">{r.label}</span>
-          </div>
-        ))}
-      </div>
+    <div className="lr-legend">
+      <div className="lr-legend-title">Map legend</div>
+      {rows.map((r) => (
+        <div key={r.label} className="lr-legend-row">
+          {r.shape === "circle" && (
+            <i style={{ width: 10, height: 10, borderRadius: "50%", background: r.color, display: "inline-block", flex: "none" }} />
+          )}
+          {r.shape === "triangle" && (
+            <i
+              style={{
+                width: 0, height: 0, flex: "none", display: "inline-block",
+                borderLeft: "5px solid transparent", borderRight: "5px solid transparent",
+                borderBottom: `9px solid ${r.color}`,
+              }}
+            />
+          )}
+          {r.shape === "line" && (
+            <i style={{ width: 14, height: 0, flex: "none", display: "inline-block", borderTop: `2px ${r.dashed ? "dashed" : "solid"} ${r.color}` }} />
+          )}
+          <span>{r.label}</span>
+        </div>
+      ))}
     </div>
   );
 }

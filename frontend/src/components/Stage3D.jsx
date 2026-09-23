@@ -5,6 +5,7 @@ import { useMemo } from "react";
  * gets its own small CSS-3D scene (perspective + rotateX/Y/Z + translateZ,
  * true 3D transforms, no WebGL/canvas dependency) so the visual actually
  * changes as the pipeline advances rather than reusing one generic loader.
+ * Styled to seamlessly match the VarunaDrishti maritime survey-chart theme.
  *
  * status: "pending" | "running" | "success" | "warning" | "error" | "skipped"
  */
@@ -14,15 +15,15 @@ export default function Stage3D({ stage, status = "pending" }) {
   const done = status === "success" || status === "skipped" || status === "warning";
 
   const toneClass = failed
-    ? "text-rose-400"
+    ? "text-[#e2532b]"
     : done
-    ? "text-emerald-400"
-    : "text-cyan-300";
+    ? "text-[#0f7f8c]"
+    : "text-[#0f7f8c]";
 
   return (
     <div
       className={`relative w-full h-40 sm:h-44 rounded-2xl overflow-hidden perspective-1000 transition-opacity duration-500 ${
-        dim ? "opacity-35 saturate-50" : "opacity-100"
+        dim ? "opacity-40 saturate-50" : "opacity-100"
       }`}
     >
       <style>{`
@@ -30,7 +31,7 @@ export default function Stage3D({ stage, status = "pending" }) {
         @keyframes s3d-popOut { 0%,20%{transform:translateY(6px) translateZ(10px) scale(.6);opacity:0} 55%{transform:translateY(-18px) translateZ(40px) scale(1);opacity:1} 85%,100%{transform:translateY(-18px) translateZ(40px) scale(1);opacity:0} }
         @keyframes s3d-slide { 0%,100%{transform:translateX(-14px) translateZ(0)} 50%{transform:translateX(14px) translateZ(18px)} }
         @keyframes s3d-cubeSpin { 0%{transform:rotateX(-18deg) rotateY(0deg)} 100%{transform:rotateX(-18deg) rotateY(360deg)} }
-        @keyframes s3d-nodePulse { 0%,100%{opacity:.4;box-shadow:0 0 4px currentColor} 50%{opacity:1;box-shadow:0 0 14px currentColor} }
+        @keyframes s3d-nodePulse { 0%,100%{opacity:.4;box-shadow:0 0 4px currentColor} 50%{opacity:1;box-shadow:0 0 12px currentColor} }
         @keyframes s3d-peel { 0%,15%{transform:rotateX(0deg)} 55%,85%{transform:rotateX(-165deg)} 100%{transform:rotateX(0deg)} }
         @keyframes s3d-dropPin { 0%{transform:translateY(-34px) translateZ(30px) scale(.7);opacity:0} 30%{opacity:1} 55%{transform:translateY(0px) translateZ(30px) scale(1)} 68%{transform:translateY(-6px) translateZ(30px) scale(1)} 80%,100%{transform:translateY(0px) translateZ(30px) scale(1)} }
         @keyframes s3d-globeSpin { 0%{transform:rotateY(0deg)} 100%{transform:rotateY(360deg)} }
@@ -41,21 +42,32 @@ export default function Stage3D({ stage, status = "pending" }) {
         @keyframes s3d-lock { 0%,100%{transform:scale(1);opacity:.7} 50%{transform:scale(1.12);opacity:1} }
       `}</style>
 
-      {/* shared ambient backdrop */}
-      <div className="absolute inset-0 bg-grid-fine bg-[length:16px_16px] opacity-20 [mask-image:radial-gradient(circle,black_40%,transparent_80%)]" />
-      <div className={`absolute inset-0 ${failed ? "bg-rose-500/5" : "bg-cyan-500/5"}`} />
+      {/* Maritime paper bathymetric ambient backdrop */}
+      <div
+        className="absolute inset-0 opacity-25"
+        style={{
+          backgroundImage: `
+            linear-gradient(rgba(12, 35, 64, 0.12) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(12, 35, 64, 0.12) 1px, transparent 1px)
+          `,
+          backgroundSize: "20px 20px",
+          maskImage: "radial-gradient(circle, black 45%, transparent 85%)",
+          WebkitMaskImage: "radial-gradient(circle, black 45%, transparent 85%)",
+        }}
+      />
+      <div className={`absolute inset-0 ${failed ? "bg-[rgba(226,83,43,0.06)]" : "bg-[rgba(15,127,140,0.06)]"}`} />
 
       <div className="relative w-full h-full flex items-center justify-center preserve-3d">
         <StageScene stage={stage} running={status === "running"} toneClass={toneClass} failed={failed} />
       </div>
 
       {done && !failed && (
-        <span className="absolute top-2 right-2 material-symbols-outlined text-emerald-400 text-lg drop-shadow-[0_0_6px_rgba(52,211,153,0.7)]">
+        <span className="absolute top-2.5 right-2.5 material-symbols-outlined text-[#0f7f8c] text-lg drop-shadow-sm">
           check_circle
         </span>
       )}
       {failed && (
-        <span className="absolute top-2 right-2 material-symbols-outlined text-rose-400 text-lg drop-shadow-[0_0_6px_rgba(251,113,133,0.7)]">
+        <span className="absolute top-2.5 right-2.5 material-symbols-outlined text-[#e2532b] text-lg drop-shadow-sm">
           error
         </span>
       )}
@@ -71,11 +83,11 @@ function StageScene({ stage, running, toneClass, failed }) {
       return (
         <div className="relative preserve-3d" style={{ width: 70, height: 54 }}>
           {/* box */}
-          <div className="absolute inset-x-0 bottom-0 h-9 rounded-b-md bg-cyan-500/15 border border-cyan-400/40" style={{ transform: "translateZ(0px)" }} />
-          <div className="absolute left-0 bottom-0 w-3 h-9" style={{ background: "rgba(34,211,238,0.10)", transform: "rotateY(-90deg) translateZ(1.5px)" }} />
+          <div className="absolute inset-x-0 bottom-0 h-9 rounded-b-md bg-[rgba(15,127,140,0.18)] border border-[rgba(15,127,140,0.45)]" style={{ transform: "translateZ(0px)" }} />
+          <div className="absolute left-0 bottom-0 w-3 h-9 bg-[rgba(15,127,140,0.12)]" style={{ transform: "rotateY(-90deg) translateZ(1.5px)" }} />
           {/* lid, hinged at top */}
           <div
-            className="absolute inset-x-0 top-0 h-9 rounded-t-md border border-cyan-400/50 bg-cyan-400/20"
+            className="absolute inset-x-0 top-0 h-9 rounded-t-md border border-[rgba(15,127,140,0.55)] bg-[rgba(15,127,140,0.25)]"
             style={{ transformOrigin: "top center", animation: `s3d-lidOpen 2.8s ease-in-out infinite`, animationPlayState: play }}
           />
           {/* popping file */}
@@ -94,7 +106,7 @@ function StageScene({ stage, running, toneClass, failed }) {
           {[0, 1, 2].map((i) => (
             <div
               key={i}
-              className="absolute inset-x-3 rounded-md border border-cyan-400/35 bg-cyan-400/10"
+              className="absolute inset-x-3 rounded-md border border-[rgba(15,127,140,0.4)] bg-[rgba(15,127,140,0.15)] shadow-sm"
               style={{
                 top: 8 + i * 15,
                 height: 14,
@@ -124,12 +136,12 @@ function StageScene({ stage, running, toneClass, failed }) {
           ].map((f, i) => (
             <div
               key={i}
-              className="absolute inset-0 border border-cyan-400/30 bg-cyan-400/5 flex items-center justify-center"
+              className="absolute inset-0 border border-[rgba(15,127,140,0.4)] bg-[rgba(15,127,140,0.12)] flex items-center justify-center"
               style={{ transform: f.t }}
             >
               <span
-                className="w-1.5 h-1.5 rounded-full bg-cyan-300"
-                style={{ animation: "s3d-nodePulse 1.4s ease-in-out infinite", animationDelay: `${i * 0.12}s`, color: "#67e8f9" }}
+                className="w-2 h-2 rounded-full bg-[#0f7f8c]"
+                style={{ animation: "s3d-nodePulse 1.4s ease-in-out infinite", animationDelay: `${i * 0.12}s`, color: "#0f7f8c" }}
               />
             </div>
           ))}
@@ -139,23 +151,23 @@ function StageScene({ stage, running, toneClass, failed }) {
     case "segmentation":
       return (
         <div className="relative preserve-3d" style={{ width: 78, height: 56 }}>
-          <div className="absolute inset-0 rounded-lg border border-teal-400/40 bg-teal-400/15" />
+          <div className="absolute inset-0 rounded-lg border border-[rgba(15,127,140,0.45)] bg-[rgba(15,127,140,0.18)]" />
           <div
-            className="absolute inset-0 rounded-lg border border-cyan-400/40 bg-cyan-400/10 flex items-center justify-center overflow-hidden"
+            className="absolute inset-0 rounded-lg border border-[rgba(15,127,140,0.5)] bg-[rgba(15,127,140,0.14)] flex items-center justify-center overflow-hidden"
             style={{ transformOrigin: "top", animation: "s3d-peel 3.2s ease-in-out infinite", animationPlayState: play }}
           >
-            <span className="material-symbols-outlined text-cyan-200/80 text-lg">layers</span>
+            <span className="material-symbols-outlined text-[#0f7f8c] text-lg">layers</span>
           </div>
-          <span className="absolute bottom-1 right-1.5 text-[9px] font-mono text-teal-300/80">MASK</span>
+          <span className="absolute bottom-1 right-1.5 text-[9px] font-mono font-bold text-[#0f7f8c]">MASK</span>
         </div>
       );
 
     case "geolocation":
       return (
         <div className="relative preserve-3d" style={{ width: 64, height: 64 }}>
-          <div className="absolute inset-0 rounded-full border border-cyan-400/25" style={{ transform: "rotateX(70deg)" }} />
+          <div className="absolute inset-0 rounded-full border border-[rgba(12,35,64,0.22)]" style={{ transform: "rotateX(70deg)" }} />
           <div
-            className="absolute inset-[8%] rounded-full border border-cyan-300/40 bg-[radial-gradient(circle_at_35%_30%,rgba(103,232,249,0.4),rgba(10,20,32,0.9)_70%)]"
+            className="absolute inset-[8%] rounded-full border border-[rgba(15,127,140,0.45)] bg-[radial-gradient(circle_at_35%_30%,rgba(15,127,140,0.35),rgba(12,35,64,0.16)_70%)]"
             style={{ animation: "s3d-globeSpin 7s linear infinite", animationPlayState: play }}
           />
           <span
@@ -172,19 +184,19 @@ function StageScene({ stage, running, toneClass, failed }) {
         <div className="relative preserve-3d" style={{ width: 84, height: 70 }}>
           <span className={`material-symbols-outlined absolute left-1/2 top-1/2 -ml-2.5 -mt-2.5 text-lg ${toneClass}`}>air</span>
           {[
-            { r: 26, z: 10, d: "3.2s", c: "bg-cyan-300" },
-            { r: 34, z: -8, d: "4.4s", c: "bg-teal-300" },
-            { r: 20, z: 20, d: "2.6s", c: "bg-sky-300" },
+            { r: 26, z: 10, d: "3.2s", c: "bg-[#0f7f8c]" },
+            { r: 34, z: -8, d: "4.4s", c: "bg-[#e2532b]" },
+            { r: 20, z: 20, d: "2.6s", c: "bg-[#c8962e]" },
           ].map((p, i) => (
             <span
               key={i}
-              className={`absolute left-1/2 top-1/2 w-1.5 h-1.5 -ml-[3px] -mt-[3px] rounded-full ${p.c}`}
+              className={`absolute left-1/2 top-1/2 w-2 h-2 -ml-[4px] -mt-[4px] rounded-full ${p.c}`}
               style={{
                 "--wr": `${p.r}px`,
                 "--wz": `${p.z}px`,
                 animation: `s3d-wisp ${p.d} linear infinite`,
                 animationPlayState: play,
-                boxShadow: "0 0 8px currentColor",
+                boxShadow: "0 0 6px currentColor",
               }}
             />
           ))}
@@ -197,7 +209,7 @@ function StageScene({ stage, running, toneClass, failed }) {
           {[0, 1, 2].map((i) => (
             <div
               key={i}
-              className="absolute inset-x-2 rounded-sm bg-cyan-400/10 border-t border-cyan-300/30"
+              className="absolute inset-x-2 rounded-sm bg-[rgba(15,127,140,0.12)] border-t border-[rgba(15,127,140,0.4)]"
               style={{
                 top: 10 + i * 12,
                 height: 10,
@@ -211,8 +223,8 @@ function StageScene({ stage, running, toneClass, failed }) {
             <path
               d="M78 14 C 50 10, 30 40, 14 50"
               fill="none"
-              stroke="rgba(103,232,249,0.55)"
-              strokeWidth="1.5"
+              stroke="rgba(15,127,140,0.75)"
+              strokeWidth="2"
               strokeDasharray="4 4"
               style={{ animation: "s3d-trail 3s linear infinite", animationPlayState: play }}
             />
@@ -227,7 +239,7 @@ function StageScene({ stage, running, toneClass, failed }) {
           {[0, 1, 2].map((i) => (
             <div
               key={i}
-              className="absolute inset-x-2 rounded-sm bg-teal-400/10 border-t border-teal-300/30"
+              className="absolute inset-x-2 rounded-sm bg-[rgba(226,83,43,0.12)] border-t border-[rgba(226,83,43,0.45)]"
               style={{
                 top: 10 + i * 12,
                 height: 10,
@@ -241,8 +253,8 @@ function StageScene({ stage, running, toneClass, failed }) {
             <path
               d="M14 50 C 30 40, 50 10, 78 14"
               fill="none"
-              stroke="rgba(45,212,191,0.65)"
-              strokeWidth="1.5"
+              stroke="rgba(226,83,43,0.8)"
+              strokeWidth="2"
               strokeDasharray="4 4"
               style={{ animation: "s3d-trail 3s linear infinite", animationPlayState: play }}
             />
@@ -254,13 +266,13 @@ function StageScene({ stage, running, toneClass, failed }) {
     case "vessel_attribution":
       return (
         <div className="relative preserve-3d flex items-center justify-center" style={{ width: 70, height: 70 }}>
-          <div className="absolute inset-0 rounded-full overflow-hidden border border-cyan-400/25" style={{ transform: "rotateX(62deg)" }}>
+          <div className="absolute inset-0 rounded-full overflow-hidden border border-[rgba(15,127,140,0.35)]" style={{ transform: "rotateX(62deg)" }}>
             <div
               className="radar-sweep absolute inset-0"
-              style={{ background: "conic-gradient(from 0deg, rgba(34,211,238,0.5), transparent 26%)", animationPlayState: play }}
+              style={{ background: "conic-gradient(from 0deg, rgba(15,127,140,0.5), transparent 26%)", animationPlayState: play }}
             />
           </div>
-          <span className="absolute w-8 h-8 rounded-full border border-cyan-300/40" style={{ animation: "s3d-lock 2s ease-in-out infinite", animationPlayState: play }} />
+          <span className="absolute w-8 h-8 rounded-full border border-[rgba(15,127,140,0.45)]" style={{ animation: "s3d-lock 2s ease-in-out infinite", animationPlayState: play }} />
           <span className={`material-symbols-outlined relative text-xl ${toneClass}`} style={{ transform: "translateZ(20px)" }}>
             directions_boat
           </span>

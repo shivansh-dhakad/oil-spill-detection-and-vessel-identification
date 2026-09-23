@@ -18,24 +18,21 @@ const STAGE_ORDER = Object.keys(STAGE_META);
 
 function StatusIcon({ status }) {
   if (status === "running")
-    return <span className="material-symbols-outlined text-primary animate-spin text-base">progress_activity</span>;
+    return <span className="material-symbols-outlined text-[#0f7f8c] animate-spin text-base">progress_activity</span>;
   if (status === "success")
-    return <span className="material-symbols-outlined text-emerald-400 text-base">check_circle</span>;
+    return <span className="material-symbols-outlined text-[#0f7f8c] text-base">check_circle</span>;
   if (status === "warning")
-    return <span className="material-symbols-outlined text-amber-400 text-base">warning</span>;
+    return <span className="material-symbols-outlined text-[#c8962e] text-base">warning</span>;
   if (status === "error")
-    return <span className="material-symbols-outlined text-rose-400 text-base">error</span>;
+    return <span className="material-symbols-outlined text-[#e2532b] text-base">error</span>;
   if (status === "skipped")
-    return <span className="material-symbols-outlined text-slate-subtle text-base">remove_circle</span>;
-  return <span className="material-symbols-outlined text-slate-subtle text-base">radio_button_unchecked</span>;
+    return <span className="material-symbols-outlined text-[#6b7d92] opacity-60 text-base">remove_circle</span>;
+  return <span className="material-symbols-outlined text-[#6b7d92] opacity-50 text-base">radio_button_unchecked</span>;
 }
 
 /**
- * Small status window shown over the upload page while a submitted job runs.
- * Streams stage progress via SSE and calls onComplete(predictionId) once the
- * ML service finishes, or lets the user close it on failure. A 3D scene up
- * top mirrors whichever stage is currently active, swapping automatically
- * as the pipeline advances.
+ * Status modal shown over the dashboard / upload page while a submitted job runs.
+ * Styled with the VarunaDrishti maritime survey-chart light theme to match Dashboard & History.
  */
 export default function AnalysisModal({ jobId, meta, onComplete, onClose }) {
   const [stages, setStages] = useState(
@@ -119,9 +116,7 @@ export default function AnalysisModal({ jobId, meta, onComplete, onClose }) {
   const completedCount = STAGE_ORDER.filter((n) => stages[n]?.status === "success").length;
   const progressPct = Math.round((completedCount / STAGE_ORDER.length) * 100);
 
-  // Which stage the big 3D panel should currently show: the one actively
-  // running, falling back to the failed one, then the last completed one,
-  // then the first stage before anything has started.
+  // Which stage the 3D panel should currently show: active running, failed, last completed, or first pending
   const runningStage = STAGE_ORDER.find((n) => stages[n]?.status === "running");
   const failedStage = STAGE_ORDER.find((n) => stages[n]?.status === "error");
   const lastDoneStage = [...STAGE_ORDER].reverse().find((n) => stages[n]?.status === "success");
@@ -129,32 +124,46 @@ export default function AnalysisModal({ jobId, meta, onComplete, onClose }) {
   const activeStatus = stages[activeStageName]?.status || "pending";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-abyss-950/70 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0c2340]/45 backdrop-blur-md">
       <motion.div
-        initial={{ opacity: 0, scale: 0.94, y: 10 }}
+        initial={{ opacity: 0, scale: 0.94, y: 12 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-        className="w-full max-w-md glass-panel rounded-2xl shadow-glow-lg p-5 space-y-4"
+        className="w-full max-w-md bg-[#fbf9f3] text-[#0c2340] border border-[rgba(12,35,64,0.14)] rounded-3xl shadow-[0_28px_60px_-20px_rgba(12,35,64,0.35),0_0_0_1px_rgba(12,35,64,0.06)] p-6 space-y-4.5 relative overflow-hidden"
       >
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="material-symbols-outlined text-primary text-xl animate-pulse">satellite_alt</span>
-            <h3 className="text-sm font-bold text-slate-heading">
-              {error ? "Analysis Failed" : "Running Analysis…"}
-            </h3>
+        {/* Subtle decorative top accent line */}
+        <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-[#0f7f8c] via-[#c8962e] to-[#e2532b]" />
+
+        {/* Modal Header */}
+        <div className="flex items-center justify-between pt-1">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-[rgba(15,127,140,0.12)] border border-[rgba(15,127,140,0.25)] flex items-center justify-center text-[#0f7f8c] shadow-sm">
+              <span className="material-symbols-outlined text-xl animate-pulse">satellite_alt</span>
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-mono font-bold tracking-widest text-[#0f7f8c] uppercase">
+                  Live SAR Pipeline
+                </span>
+                <span className="w-1.5 h-1.5 rounded-full bg-[#0f7f8c] animate-ping" />
+              </div>
+              <h3 className="text-base font-bold font-display text-[#0c2340] tracking-tight">
+                {error ? "Analysis Failed" : "Running Analysis…"}
+              </h3>
+            </div>
           </div>
           <button
             onClick={handleClose}
             disabled={cancelling}
-            className="p-1 rounded-lg text-slate-subtle hover:text-rose-300 hover:bg-rose-500/10 disabled:opacity-60 transition-colors"
+            className="w-8 h-8 rounded-xl flex items-center justify-center text-[#6b7d92] hover:text-[#e2532b] hover:bg-[rgba(226,83,43,0.08)] border border-transparent hover:border-[rgba(226,83,43,0.2)] disabled:opacity-60 transition-all"
             title={error ? "Close" : "Stop analysis"}
           >
             <span className="material-symbols-outlined text-lg">close</span>
           </button>
         </div>
 
-        {/* 3D scene for the currently active stage */}
-        <div className="relative rounded-xl border border-white/10 bg-black/20">
+        {/* 3D scene container */}
+        <div className="relative rounded-2xl border border-[rgba(12,35,64,0.12)] bg-[#eae4d6]/60 overflow-hidden shadow-inner">
           <AnimatePresence mode="wait">
             <motion.div
               key={activeStageName}
@@ -166,61 +175,84 @@ export default function AnalysisModal({ jobId, meta, onComplete, onClose }) {
               <Stage3D stage={activeStageName} status={activeStatus} />
             </motion.div>
           </AnimatePresence>
-          <div className="absolute bottom-1.5 left-1/2 -translate-x-1/2 px-2.5 py-0.5 rounded-full bg-black/40 border border-white/10 text-[10px] font-mono text-cyan-200 tracking-wide whitespace-nowrap">
+          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-[#fbf9f3]/95 backdrop-blur-sm border border-[rgba(12,35,64,0.14)] text-[11px] font-mono font-semibold text-[#0c2340] tracking-wide shadow-sm whitespace-nowrap flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#0f7f8c]" />
             {STAGE_META[activeStageName]?.label}
           </div>
         </div>
 
+        {/* Progress bar */}
         {!error && (
-          <div className="space-y-1">
-            <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-[11px] font-mono">
+              <span className="text-[#6b7d92] font-medium">Pipeline Progress</span>
+              <span className="text-[#0c2340] font-bold">{progressPct}%</span>
+            </div>
+            <div className="w-full h-2 bg-[rgba(12,35,64,0.08)] rounded-full overflow-hidden p-0.5 border border-[rgba(12,35,64,0.06)]">
               <div
-                className="h-full bg-gradient-to-r from-cyan-400 to-teal-300 rounded-full transition-all duration-500 shadow-glow"
+                className="h-full bg-gradient-to-r from-[#0f7f8c] to-[#e2532b] rounded-full transition-all duration-500 shadow-sm"
                 style={{ width: `${progressPct}%` }}
               />
             </div>
-            <div className="text-right text-[10px] font-mono text-slate-subtle">{progressPct}%</div>
           </div>
         )}
 
-        <div className="space-y-1.5 max-h-64 overflow-y-auto custom-scrollbar">
+        {/* Stages checklist */}
+        <div className="space-y-1 max-h-56 overflow-y-auto pr-1 custom-scrollbar">
           {STAGE_ORDER.map((name) => {
             const stage = stages[name] || { status: "pending" };
             const m = STAGE_META[name];
             const isActive = name === activeStageName;
+            const isRunning = stage.status === "running";
+            const isSuccess = stage.status === "success";
+            const isError = stage.status === "error";
+
             return (
               <div
                 key={name}
-                className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs transition-colors ${
-                  stage.status === "running"
-                    ? "bg-cyan-500/10"
+                className={`flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs transition-all ${
+                  isRunning
+                    ? "bg-[rgba(15,127,140,0.12)] border border-[rgba(15,127,140,0.28)] text-[#0c2340] shadow-sm"
+                    : isError
+                    ? "bg-[rgba(226,83,43,0.08)] border border-[rgba(226,83,43,0.25)] text-[#e2532b]"
                     : isActive
-                    ? "bg-white/5"
-                    : "bg-transparent"
+                    ? "bg-[rgba(12,35,64,0.04)] border border-[rgba(12,35,64,0.08)] text-[#0c2340]"
+                    : isSuccess
+                    ? "text-[#3c4e64] hover:bg-[rgba(12,35,64,0.02)]"
+                    : "text-[#6b7d92] opacity-75"
                 }`}
               >
                 <StatusIcon status={stage.status} />
-                <span className="material-symbols-outlined text-slate-subtle text-sm">{m.icon}</span>
-                <span
-                  className={`font-medium truncate ${
-                    stage.status === "pending" ? "text-slate-subtle" : "text-slate-heading"
-                  }`}
-                >
+                <span className={`material-symbols-outlined text-sm ${isRunning || isSuccess ? "text-[#0f7f8c]" : "text-[#6b7d92]"}`}>
+                  {m.icon}
+                </span>
+                <span className={`font-medium truncate flex-1 ${isRunning ? "font-bold text-[#0c2340]" : ""}`}>
                   {m.label}
                 </span>
+                {isRunning && (
+                  <span className="text-[10px] font-mono uppercase tracking-wider text-[#0f7f8c] font-bold">
+                    Active
+                  </span>
+                )}
               </div>
             );
           })}
         </div>
 
+        {/* Error message */}
         {error && (
-          <div className="text-xs font-mono text-rose-300 bg-rose-500/10 border border-rose-400/25 rounded-lg px-3 py-2">
-            {error}
+          <div className="text-xs font-mono text-[#e2532b] bg-[rgba(226,83,43,0.08)] border border-[rgba(226,83,43,0.25)] rounded-xl px-3.5 py-2.5 flex items-center gap-2">
+            <span className="material-symbols-outlined text-base text-[#e2532b] shrink-0">error</span>
+            <span className="truncate">{error}</span>
           </div>
         )}
 
+        {/* Done message */}
         {!error && status === "complete" && (
-          <p className="text-center text-xs font-mono text-emerald-400">Done - loading results…</p>
+          <div className="flex items-center justify-center gap-2 text-xs font-mono font-bold text-[#0f7f8c] bg-[rgba(15,127,140,0.08)] border border-[rgba(15,127,140,0.2)] rounded-xl py-2 px-3">
+            <span className="material-symbols-outlined text-base animate-spin">sync</span>
+            <span>Done · Loading results…</span>
+          </div>
         )}
       </motion.div>
     </div>
