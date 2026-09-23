@@ -69,14 +69,11 @@ export const api = {
    * immediately - the pipeline itself runs asynchronously. Navigate to
    * /processing/:jobId (passing `meta` along) to show live progress.
    */
-  createPrediction: ({ file, sourceType, sensor, latitude, longitude, timestamp, lookbackDays, forecastHours, skipAis }) => {
+  createPrediction: ({ file, sourceType, sensor, lookbackDays, forecastHours, skipAis }) => {
     const form = new FormData();
     if (file) form.append("file", file);
     form.append("sourceType", sourceType || "sar_image");
     form.append("sensor", sensor || "Sentinel-1A IW");
-    if (latitude !== undefined && latitude !== "") form.append("latitude", latitude);
-    if (longitude !== undefined && longitude !== "") form.append("longitude", longitude);
-    if (timestamp) form.append("timestamp", timestamp);
     if (lookbackDays) form.append("lookbackDays", lookbackDays);
     if (forecastHours) form.append("forecastHours", forecastHours);
     if (skipAis) form.append("skipAis", "true");

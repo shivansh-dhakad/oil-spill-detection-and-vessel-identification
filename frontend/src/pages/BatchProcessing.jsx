@@ -10,7 +10,6 @@ function isSafeProduct(file) {
   return (
     /\.safe(?:\.zip)?$/i.test(file.name) ||
     /\.safe\.zip$/i.test(file.webkitRelativePath || "") ||
-    /\.tif(?:f)?$/i.test(file.name) ||
     /\.zip$/i.test(file.name)
   );
 }
@@ -63,7 +62,7 @@ export default function BatchProcessing() {
     setError(
       validFiles.length
         ? null
-        : "No Sentinel-1 .SAFE, .SAFE.zip, or GeoTIFF products were found in the selected folder."
+        : "No Sentinel-1 .SAFE or .SAFE.zip products were found in the selected folder."
     );
   }
 
@@ -83,8 +82,7 @@ export default function BatchProcessing() {
 
   async function processFile(file, batchId) {
     const fileName = file.webkitRelativePath || file.name;
-    const sourceType =
-      file.name.toLowerCase().endsWith(".tif") || file.name.toLowerCase().endsWith(".tiff") ? "sar_image" : "safe_zip";
+    const sourceType = "safe_zip";
 
     try {
       setLogs((current) => [
@@ -242,7 +240,7 @@ export default function BatchProcessing() {
             <em>one sitting.</em>
           </h1>
           <motion.p className="lt-hist-sub" initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3, duration: 0.8, ease: [0.16, 1, 0.3, 1] }}>
-            Point at a folder of Sentinel-1 archives or GeoTIFFs. Every product is found automatically and run through the full pipeline, one after another or in parallel.
+            Point at a folder of Sentinel-1 SAFE archives. Every product is found automatically and run through the full pipeline, one after another or in parallel.
           </motion.p>
         </div>
 
@@ -263,7 +261,7 @@ export default function BatchProcessing() {
             </span>
             <span className="lt-folder-text">
               <b>{folderName || "Choose a folder"}</b>
-              <small>Scans .SAFE, .SAFE.zip and .tif files, including subfolders</small>
+              <small>Scans .SAFE and .SAFE.zip files, including subfolders</small>
             </span>
             {files.length > 0 && <span className="lt-chip">{files.length} found</span>}
           </label>

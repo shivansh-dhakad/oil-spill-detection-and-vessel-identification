@@ -5,16 +5,6 @@ import { api } from "../api.js";
 import AnalysisModal from "../components/AnalysisModal.jsx";
 import "../dashboard.css";
 
-// .tif/.tiff uploads are treated as "sar_image" sources - the ML service
-// (tif_processor.py) reads embedded GeoTIFF georeferencing and acquisition
-// time straight from the file, so no manual coordinate entry is needed.
-// .SAFE/.SAFE.zip archives keep their own richer geolocation ("safe_zip").
-function inferSourceType(file) {
-  const name = (file?.name || "").toLowerCase();
-  if (name.endsWith(".tif") || name.endsWith(".tiff")) return "sar_image";
-  return "safe_zip";
-}
-
 /* ------------------------------------------------------------------ data */
 
 const STAGES = [
@@ -171,7 +161,7 @@ export default function NewPrediction() {
 
   const inputRef = useRef(null);
   const navigate = useNavigate();
-  const accept = ".zip,.SAFE,.tif,.tiff";
+  const accept = ".zip,.SAFE.zip";
 
   // Scroll-driven cover: the hero stays pinned and fades/zooms while the
   // content "curtain" slides up over it.
@@ -197,7 +187,7 @@ export default function NewPrediction() {
     setSubmitting(true);
     setError(null);
     try {
-      const sourceType = inferSourceType(file);
+      const sourceType = "safe_zip";
       const sensor = "Sentinel-1A IW";
       const { jobId } = await api.createPrediction({ file, sourceType, sensor });
       setActiveJob({ jobId, meta: { sourceType, sensor, originalName: file.name } });
@@ -286,14 +276,14 @@ export default function NewPrediction() {
               </Reveal>
               <Reveal i={2}>
                 <p className="lt-lede">
-                  Drop in a Sentinel-1 archive or a georeferenced GeoTIFF. The pipeline runs in the background and you can watch each stage complete.
+                  Drop in a Sentinel-1 SAFE archive. The pipeline runs in the background and you can watch each stage complete.
                 </p>
               </Reveal>
               <Reveal i={3}>
                 <ul className="lt-facts">
                   <li>
                     <span className="lt-fact-ico"><span className="material-symbols-outlined">my_location</span></span>
-                    <div><strong>No coordinates to type</strong>SAFE archives and GeoTIFFs carry their own location and acquisition time.</div>
+                    <div><strong>No coordinates to type</strong>SAFE archives carry their own location and acquisition time.</div>
                   </li>
                   <li>
                     <span className="lt-fact-ico"><span className="material-symbols-outlined">speed</span></span>
@@ -313,7 +303,6 @@ export default function NewPrediction() {
                   <span className="lt-eyebrow is-plain">New analysis</span>
                   <div className="lt-chips">
                     <span className="lt-chip">.SAFE.zip</span>
-                    <span className="lt-chip">.tif / .tiff</span>
                   </div>
                 </div>
 
@@ -327,7 +316,7 @@ export default function NewPrediction() {
                     <span className="material-symbols-outlined">cloud_upload</span>
                   </div>
                   <h3 className="lt-display">Drop a .SAFE.zip here</h3>
-                  <p>Sentinel-1 GRD archive, or a georeferenced GeoTIFF</p>
+                  <p>Sentinel-1 GRD SAFE archive</p>
                   <label className="lt-btn lt-btn-ink lt-pick">
                     <span className="material-symbols-outlined">file_open</span>
                     Select file
