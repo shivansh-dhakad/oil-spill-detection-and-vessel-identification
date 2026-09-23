@@ -105,7 +105,19 @@ function attachProximityRanking(candidates, spillCenter) {
 // createPredictionFromMlResult() below - no seed/demo data.
 let predictions = [];
 
-let nextSeq = 1;
+// Collision-proof prediction IDs. The old in-memory counter restarted at 1 on
+// every backend restart, so new runs reused IDs of predictions already loaded
+// from Supabase (and the upsert overwrote the old row).
+function newPredictionId() {
+  const stamp = Date.now().toString(36).toUpperCase();
+  const rand = Math.random().toString(36).slice(2, 6).toUpperCase();
+  let id = `PRED-${new Date().getFullYear()}-${stamp}${rand}`;
+  while (predictions.some((p) => p.id === id)) {
+    id = `PRED-${new Date().getFullYear()}-${stamp}${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+  }
+  return id;
+}
+
 const readAlertIds = new Set();
 const cancelledJobIds = new Set();
 
@@ -350,7 +362,7 @@ function mapMlCandidate(c, rank) {
  * the rest of this app already knows how to render, and stores it.
  */
 function createPredictionFromMlResult(mlResult, { jobId, originalName, sourceType, sensor } = {}) {
-  const id = `PRED-2025-${String(nextSeq++).padStart(3, "0")}`;
+  const id = newPredictionId();
   const detectionInfo = mlResult.detection || {};
   const isOil = !!detectionInfo.is_oil_spill;
   const geo = mlResult.geolocation || null;
@@ -666,6 +678,7 @@ async function initFromSupabase() {
       const existingIds = new Set(predictions.map((p) => p.id));
       for (const p of remote) {
         if (!existingIds.has(p.id)) {
+          existingIds.add(p.id);
           predictions.push(p);
           if (p.jobId) jobToPrediction.set(p.jobId, p.id);
         }
