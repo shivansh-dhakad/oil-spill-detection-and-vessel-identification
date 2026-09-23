@@ -23,9 +23,6 @@ async function submitAnalysis({ filePath, fileName, fields }) {
   form.append("file", fs.createReadStream(filePath), { filename: fileName });
 
   const passthroughFields = [
-    "latitude",
-    "longitude",
-    "timestamp",
     "lookback_days",
     "forecast_hours",
     "release_hours_ago",

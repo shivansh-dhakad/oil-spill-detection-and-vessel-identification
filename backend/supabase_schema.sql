@@ -95,7 +95,7 @@ create policy "service_role full access to predictions"
 -- --------------------------------------------------------------------------
 -- insitu_currents
 -- Stores discrete ocean current observations (from Copernicus / Argo / drifters).
--- Replaces the need to deploy the 507MB CSV file along with the web/ML service.
+-- Allows the ML service to read the current observations without loading the local CSV.
 -- --------------------------------------------------------------------------
 create table if not exists public.insitu_currents (
   id                    bigint generated always as identity primary key,

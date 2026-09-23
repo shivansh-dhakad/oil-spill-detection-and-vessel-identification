@@ -42,16 +42,6 @@ const upload = multer({
   limits: { fileSize: MAX_UPLOAD_MB * 1024 * 1024 },
 });
 
-// .tif/.tiff uploads frequently carry their own embedded georeferencing
-// (and sometimes an acquisition timestamp) - the ML service (tif_processor.py)
-// reads that straight from the file, so this route shouldn't force the user
-// to re-enter coordinates for those uploads the way a plain non-georeferenced
-// image (.png/.jpg/.bmp) still needs. If a .tif turns out to have no usable
-// embedded geolocation, the ML service itself reports a clear 400 explaining
-// that manual coordinates are needed - this route just doesn't block it
-// up front on a guess.
-const GEO_CAPABLE_IMAGE_EXTENSIONS = new Set([".tif", ".tiff"]);
-
 /** Best-effort cleanup of the temp upload once it's been handed to Flask (or failed to be). */
 function cleanupUpload(filePath) {
   if (!filePath) return;
@@ -85,15 +75,9 @@ router.get("/:id", (req, res) => {
 // ----------------------------------------------------------------------- //
 
 // POST /api/predictions  (multipart/form-data)
-//   file            (required) - .SAFE.zip / .zip archive, a Sentinel-1
-//                                 georeferenced .tif/.tiff, or a plain SAR image
-//   sourceType      "safe_zip" | "sar_image"
+//   file            (required) - Sentinel-1 .SAFE.zip / .zip archive
+//   sourceType      "safe_zip"
 //   sensor          display label, e.g. "Sentinel-1A IW"
-//   latitude, longitude   required for non-georeferenced images (.png/.jpg/.bmp);
-//                          optional for .tif/.tiff (auto-extracted server-side
-//                          when the file carries embedded georeferencing)
-//   timestamp             optional ISO 8601 UTC acquisition time - also
-//                          auto-extracted from .tif/.tiff metadata when present
 //   lookbackDays          optional, default 20
 //   skipAis               optional "true"/"false"
 //
@@ -118,20 +102,11 @@ router.post("/", (req, res, next) => {
     if (!req.file) {
       return res.status(400).json({ error: "No file provided (field name must be 'file')." });
     }
-    const { sourceType, sensor, latitude, longitude, timestamp, lookbackDays, forecastHours, skipAis } = req.body;
-
+    const { sourceType, sensor, lookbackDays, forecastHours, skipAis } = req.body;
     const uploadedExt = path.extname(req.file.originalname || "").toLowerCase();
-    const isGeoCapableImage = GEO_CAPABLE_IMAGE_EXTENSIONS.has(uploadedExt);
-
-    if (
-      sourceType === "sar_image" &&
-      !isGeoCapableImage &&
-      (latitude === undefined || longitude === undefined || latitude === "" || longitude === "")
-    ) {
+    if (uploadedExt !== ".zip") {
       return res.status(400).json({
-        error:
-          "latitude and longitude are required for this image type (SAFE archives and georeferenced " +
-          ".tif/.tiff files carry their own geolocation).",
+        error: "Only Sentinel-1 .SAFE.zip archives are supported.",
       });
     }
 
@@ -141,9 +116,6 @@ router.post("/", (req, res, next) => {
         filePath: req.file.path,
         fileName: req.file.originalname,
         fields: {
-          latitude,
-          longitude,
-          timestamp,
           lookback_days: lookbackDays,
           forecast_hours: forecastHours,
           skip_ais: skipAis,
