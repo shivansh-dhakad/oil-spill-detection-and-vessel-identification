@@ -46,3 +46,5 @@ npm run dev
 ```
 
 Open `http://localhost:5173` and upload a Sentinel-1 `.SAFE.zip` archive. See [local setup](docs/local-setup.md) before configuring external services or changing upload limits.
+
+for project explaination check out youtube video https://youtu.be/lwDi0LWCKfQ
