@@ -1,0 +1,289 @@
+import { useMemo } from "react";
+
+/**
+ * Per-stage 3D visualization for the analysis modal. Each pipeline stage
+ * gets its own small CSS-3D scene (perspective + rotateX/Y/Z + translateZ,
+ * true 3D transforms, no WebGL/canvas dependency) so the visual actually
+ * changes as the pipeline advances rather than reusing one generic loader.
+ * Styled to seamlessly match the VarunaDrishti maritime survey-chart theme.
+ *
+ * status: "pending" | "running" | "success" | "warning" | "error" | "skipped"
+ */
+export default function Stage3D({ stage, status = "pending" }) {
+  const dim = status === "pending";
+  const failed = status === "error";
+  const done = status === "success" || status === "skipped" || status === "warning";
+
+  const toneClass = failed
+    ? "text-[#e2532b]"
+    : done
+    ? "text-[#0f7f8c]"
+    : "text-[#0f7f8c]";
+
+  return (
+    <div
+      className={`relative w-full h-40 sm:h-44 rounded-2xl overflow-hidden perspective-1000 transition-opacity duration-500 ${
+        dim ? "opacity-40 saturate-50" : "opacity-100"
+      }`}
+    >
+      <style>{`
+        @keyframes s3d-lidOpen { 0%,12%{transform:rotateX(0deg)} 45%,80%{transform:rotateX(-118deg)} 100%{transform:rotateX(0deg)} }
+        @keyframes s3d-popOut { 0%,20%{transform:translateY(6px) translateZ(10px) scale(.6);opacity:0} 55%{transform:translateY(-18px) translateZ(40px) scale(1);opacity:1} 85%,100%{transform:translateY(-18px) translateZ(40px) scale(1);opacity:0} }
+        @keyframes s3d-slide { 0%,100%{transform:translateX(-14px) translateZ(0)} 50%{transform:translateX(14px) translateZ(18px)} }
+        @keyframes s3d-cubeSpin { 0%{transform:rotateX(-18deg) rotateY(0deg)} 100%{transform:rotateX(-18deg) rotateY(360deg)} }
+        @keyframes s3d-nodePulse { 0%,100%{opacity:.4;box-shadow:0 0 4px currentColor} 50%{opacity:1;box-shadow:0 0 12px currentColor} }
+        @keyframes s3d-peel { 0%,15%{transform:rotateX(0deg)} 55%,85%{transform:rotateX(-165deg)} 100%{transform:rotateX(0deg)} }
+        @keyframes s3d-dropPin { 0%{transform:translateY(-34px) translateZ(30px) scale(.7);opacity:0} 30%{opacity:1} 55%{transform:translateY(0px) translateZ(30px) scale(1)} 68%{transform:translateY(-6px) translateZ(30px) scale(1)} 80%,100%{transform:translateY(0px) translateZ(30px) scale(1)} }
+        @keyframes s3d-globeSpin { 0%{transform:rotateY(0deg)} 100%{transform:rotateY(360deg)} }
+        @keyframes s3d-wisp { 0%{transform:rotate(0deg) translateX(var(--wr,30px)) rotate(0deg) translateZ(var(--wz,0px))} 100%{transform:rotate(360deg) translateX(var(--wr,30px)) rotate(-360deg) translateZ(var(--wz,0px))} }
+        @keyframes s3d-wave { 0%,100%{transform:translateY(0) rotateX(55deg)} 50%{transform:translateY(-7px) rotateX(55deg)} }
+        @keyframes s3d-trail { 0%{stroke-dashoffset:120} 100%{stroke-dashoffset:0} }
+        @keyframes s3d-driftDot { 0%{offset-distance:0%} 100%{offset-distance:100%} }
+        @keyframes s3d-lock { 0%,100%{transform:scale(1);opacity:.7} 50%{transform:scale(1.12);opacity:1} }
+      `}</style>
+
+      {/* Maritime paper bathymetric ambient backdrop */}
+      <div
+        className="absolute inset-0 opacity-25"
+        style={{
+          backgroundImage: `
+            linear-gradient(rgba(12, 35, 64, 0.12) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(12, 35, 64, 0.12) 1px, transparent 1px)
+          `,
+          backgroundSize: "20px 20px",
+          maskImage: "radial-gradient(circle, black 45%, transparent 85%)",
+          WebkitMaskImage: "radial-gradient(circle, black 45%, transparent 85%)",
+        }}
+      />
+      <div className={`absolute inset-0 ${failed ? "bg-[rgba(226,83,43,0.06)]" : "bg-[rgba(15,127,140,0.06)]"}`} />
+
+      <div className="relative w-full h-full flex items-center justify-center preserve-3d">
+        <StageScene stage={stage} running={status === "running"} toneClass={toneClass} failed={failed} />
+      </div>
+
+      {done && !failed && (
+        <span className="absolute top-2.5 right-2.5 material-symbols-outlined text-[#0f7f8c] text-lg drop-shadow-sm">
+          check_circle
+        </span>
+      )}
+      {failed && (
+        <span className="absolute top-2.5 right-2.5 material-symbols-outlined text-[#e2532b] text-lg drop-shadow-sm">
+          error
+        </span>
+      )}
+    </div>
+  );
+}
+
+function StageScene({ stage, running, toneClass, failed }) {
+  const play = running ? "running" : "paused";
+
+  switch (stage) {
+    case "extraction":
+      return (
+        <div className="relative preserve-3d" style={{ width: 70, height: 54 }}>
+          {/* box */}
+          <div className="absolute inset-x-0 bottom-0 h-9 rounded-b-md bg-[rgba(15,127,140,0.18)] border border-[rgba(15,127,140,0.45)]" style={{ transform: "translateZ(0px)" }} />
+          <div className="absolute left-0 bottom-0 w-3 h-9 bg-[rgba(15,127,140,0.12)]" style={{ transform: "rotateY(-90deg) translateZ(1.5px)" }} />
+          {/* lid, hinged at top */}
+          <div
+            className="absolute inset-x-0 top-0 h-9 rounded-t-md border border-[rgba(15,127,140,0.55)] bg-[rgba(15,127,140,0.25)]"
+            style={{ transformOrigin: "top center", animation: `s3d-lidOpen 2.8s ease-in-out infinite`, animationPlayState: play }}
+          />
+          {/* popping file */}
+          <span
+            className={`material-symbols-outlined absolute left-1/2 -ml-2.5 top-2 text-lg ${toneClass}`}
+            style={{ animation: `s3d-popOut 2.8s ease-in-out infinite`, animationPlayState: play }}
+          >
+            description
+          </span>
+        </div>
+      );
+
+    case "preprocessing":
+      return (
+        <div className="relative preserve-3d" style={{ width: 84, height: 60 }}>
+          {[0, 1, 2].map((i) => (
+            <div
+              key={i}
+              className="absolute inset-x-3 rounded-md border border-[rgba(15,127,140,0.4)] bg-[rgba(15,127,140,0.15)] shadow-sm"
+              style={{
+                top: 8 + i * 15,
+                height: 14,
+                transform: `translateZ(${i * 14}px)`,
+                animation: `s3d-slide ${2.2 + i * 0.3}s ease-in-out infinite`,
+                animationDelay: `${i * 0.15}s`,
+                animationPlayState: play,
+              }}
+            />
+          ))}
+          <span className={`material-symbols-outlined absolute -top-1 right-0 text-sm ${toneClass}`} style={{ transform: "translateZ(40px)" }}>
+            tune
+          </span>
+        </div>
+      );
+
+    case "model_inference":
+      return (
+        <div className="preserve-3d" style={{ width: 64, height: 64, animation: "s3d-cubeSpin 6s linear infinite", animationPlayState: play }}>
+          {[
+            { t: "translateZ(32px)" },
+            { t: "translateZ(-32px) rotateY(180deg)" },
+            { t: "rotateY(90deg) translateZ(32px)" },
+            { t: "rotateY(-90deg) translateZ(32px)" },
+            { t: "rotateX(90deg) translateZ(32px)" },
+            { t: "rotateX(-90deg) translateZ(32px)" },
+          ].map((f, i) => (
+            <div
+              key={i}
+              className="absolute inset-0 border border-[rgba(15,127,140,0.4)] bg-[rgba(15,127,140,0.12)] flex items-center justify-center"
+              style={{ transform: f.t }}
+            >
+              <span
+                className="w-2 h-2 rounded-full bg-[#0f7f8c]"
+                style={{ animation: "s3d-nodePulse 1.4s ease-in-out infinite", animationDelay: `${i * 0.12}s`, color: "#0f7f8c" }}
+              />
+            </div>
+          ))}
+        </div>
+      );
+
+    case "segmentation":
+      return (
+        <div className="relative preserve-3d" style={{ width: 78, height: 56 }}>
+          <div className="absolute inset-0 rounded-lg border border-[rgba(15,127,140,0.45)] bg-[rgba(15,127,140,0.18)]" />
+          <div
+            className="absolute inset-0 rounded-lg border border-[rgba(15,127,140,0.5)] bg-[rgba(15,127,140,0.14)] flex items-center justify-center overflow-hidden"
+            style={{ transformOrigin: "top", animation: "s3d-peel 3.2s ease-in-out infinite", animationPlayState: play }}
+          >
+            <span className="material-symbols-outlined text-[#0f7f8c] text-lg">layers</span>
+          </div>
+          <span className="absolute bottom-1 right-1.5 text-[9px] font-mono font-bold text-[#0f7f8c]">MASK</span>
+        </div>
+      );
+
+    case "geolocation":
+      return (
+        <div className="relative preserve-3d" style={{ width: 64, height: 64 }}>
+          <div className="absolute inset-0 rounded-full border border-[rgba(12,35,64,0.22)]" style={{ transform: "rotateX(70deg)" }} />
+          <div
+            className="absolute inset-[8%] rounded-full border border-[rgba(15,127,140,0.45)] bg-[radial-gradient(circle_at_35%_30%,rgba(15,127,140,0.35),rgba(12,35,64,0.16)_70%)]"
+            style={{ animation: "s3d-globeSpin 7s linear infinite", animationPlayState: play }}
+          />
+          <span
+            className={`material-symbols-outlined absolute left-1/2 -ml-2.5 top-0 text-xl ${toneClass}`}
+            style={{ animation: "s3d-dropPin 2.6s ease-in-out infinite", animationPlayState: play }}
+          >
+            location_on
+          </span>
+        </div>
+      );
+
+    case "environmental_data":
+      return (
+        <div className="relative preserve-3d" style={{ width: 84, height: 70 }}>
+          <span className={`material-symbols-outlined absolute left-1/2 top-1/2 -ml-2.5 -mt-2.5 text-lg ${toneClass}`}>air</span>
+          {[
+            { r: 26, z: 10, d: "3.2s", c: "bg-[#0f7f8c]" },
+            { r: 34, z: -8, d: "4.4s", c: "bg-[#e2532b]" },
+            { r: 20, z: 20, d: "2.6s", c: "bg-[#c8962e]" },
+          ].map((p, i) => (
+            <span
+              key={i}
+              className={`absolute left-1/2 top-1/2 w-2 h-2 -ml-[4px] -mt-[4px] rounded-full ${p.c}`}
+              style={{
+                "--wr": `${p.r}px`,
+                "--wz": `${p.z}px`,
+                animation: `s3d-wisp ${p.d} linear infinite`,
+                animationPlayState: play,
+                boxShadow: "0 0 6px currentColor",
+              }}
+            />
+          ))}
+        </div>
+      );
+
+    case "drift_hindcast":
+      return (
+        <div className="relative preserve-3d" style={{ width: 90, height: 64 }}>
+          {[0, 1, 2].map((i) => (
+            <div
+              key={i}
+              className="absolute inset-x-2 rounded-sm bg-[rgba(15,127,140,0.12)] border-t border-[rgba(15,127,140,0.4)]"
+              style={{
+                top: 10 + i * 12,
+                height: 10,
+                animation: `s3d-wave 2.4s ease-in-out infinite`,
+                animationDelay: `${i * 0.25}s`,
+                animationPlayState: play,
+              }}
+            />
+          ))}
+          <svg viewBox="0 0 90 64" className="absolute inset-0 w-full h-full overflow-visible">
+            <path
+              d="M78 14 C 50 10, 30 40, 14 50"
+              fill="none"
+              stroke="rgba(15,127,140,0.75)"
+              strokeWidth="2"
+              strokeDasharray="4 4"
+              style={{ animation: "s3d-trail 3s linear infinite", animationPlayState: play }}
+            />
+          </svg>
+          <span className={`material-symbols-outlined absolute top-1.5 right-1.5 text-base ${toneClass}`}>history</span>
+        </div>
+      );
+
+    case "drift_forecast":
+      return (
+        <div className="relative preserve-3d" style={{ width: 90, height: 64 }}>
+          {[0, 1, 2].map((i) => (
+            <div
+              key={i}
+              className="absolute inset-x-2 rounded-sm bg-[rgba(226,83,43,0.12)] border-t border-[rgba(226,83,43,0.45)]"
+              style={{
+                top: 10 + i * 12,
+                height: 10,
+                animation: `s3d-wave 2.4s ease-in-out infinite`,
+                animationDelay: `${i * 0.25}s`,
+                animationPlayState: play,
+              }}
+            />
+          ))}
+          <svg viewBox="0 0 90 64" className="absolute inset-0 w-full h-full overflow-visible">
+            <path
+              d="M14 50 C 30 40, 50 10, 78 14"
+              fill="none"
+              stroke="rgba(226,83,43,0.8)"
+              strokeWidth="2"
+              strokeDasharray="4 4"
+              style={{ animation: "s3d-trail 3s linear infinite", animationPlayState: play }}
+            />
+          </svg>
+          <span className={`material-symbols-outlined absolute top-1.5 right-1.5 text-base ${toneClass}`}>trending_up</span>
+        </div>
+      );
+
+    case "vessel_attribution":
+      return (
+        <div className="relative preserve-3d flex items-center justify-center" style={{ width: 70, height: 70 }}>
+          <div className="absolute inset-0 rounded-full overflow-hidden border border-[rgba(15,127,140,0.35)]" style={{ transform: "rotateX(62deg)" }}>
+            <div
+              className="radar-sweep absolute inset-0"
+              style={{ background: "conic-gradient(from 0deg, rgba(15,127,140,0.5), transparent 26%)", animationPlayState: play }}
+            />
+          </div>
+          <span className="absolute w-8 h-8 rounded-full border border-[rgba(15,127,140,0.45)]" style={{ animation: "s3d-lock 2s ease-in-out infinite", animationPlayState: play }} />
+          <span className={`material-symbols-outlined relative text-xl ${toneClass}`} style={{ transform: "translateZ(20px)" }}>
+            directions_boat
+          </span>
+        </div>
+      );
+
+    default:
+      return (
+        <span className={`material-symbols-outlined text-3xl ${toneClass} ${running ? "animate-spin" : ""}`}>
+          {failed ? "error" : "satellite_alt"}
+        </span>
+      );
+  }
+}
