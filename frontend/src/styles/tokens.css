@@ -1,0 +1,47 @@
+:root {
+  --ink-0: #0a0a0c;
+  --ink-1: #121215;
+  --ink-2: #1b1b20;
+  --ink-3: #24242c;
+  --line: #26262e;
+  --line-strong: #383844;
+  --text: #ece9e1;
+  --text-muted: #c5c2ba;
+  --text-dim: #8e8b82;
+  --accent: #f2a93b;
+  --accent-light: #ffd27a;
+  --accent-glow: rgba(242, 169, 59, 0.18);
+  --accent-ink: #1c1306;
+  --focus: #ffd27a;
+  --success: #4ade80;
+  --info: #60a5fa;
+
+  --font-display: 'Space Grotesk Variable', 'Space Grotesk', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+
+  --step--2: 0.75rem;
+  --step--1: 0.875rem;
+  --step-0: 1rem;
+  --step-1: 1.25rem;
+  --step-2: 1.625rem;
+  --step-3: clamp(2.5rem, 6.5vw, 5.25rem);
+  --step-4: clamp(3.2rem, 9vw, 6.75rem);
+
+  --space-0: 0.25rem;
+  --space-1: 0.5rem;
+  --space-2: 1rem;
+  --space-3: 1.5rem;
+  --space-4: 2.5rem;
+  --space-5: 4rem;
+  --space-6: 6rem;
+
+  --radius-sm: 4px;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --measure: 64ch;
+  --page: 1160px;
+
+  --transition-fast: 150ms cubic-bezier(0.16, 1, 0.3, 1);
+  --transition-base: 250ms cubic-bezier(0.16, 1, 0.3, 1);
+  --transition-slow: 400ms cubic-bezier(0.16, 1, 0.3, 1);
+}
